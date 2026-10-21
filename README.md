@@ -21,7 +21,10 @@ Aplikasi absensi siswa berbasis web (satu halaman) yang berjalan sepenuhnya di b
 ```
 Aplikasi Absen/
 ├── index.html              # Kerangka SPA: sidebar, header, 6 halaman, dialog, CDN
-├── server.js               # Server statis Node; menyuntik .env sebagai /js/config.js
+├── server.js               # Server statis Node (lokal); menyuntik .env sebagai /api/config.js
+├── vercel.json             # Konfigurasi deploy Vercel (function + output statis)
+├── api/
+│   └── config.js           # Function Vercel (CommonJS); menyuntik process.env sebagai /api/config.js
 ├── .env                    # Kredensial Supabase (tidak di-commit)
 ├── .env.example            # Template konfigurasi Supabase (salin menjadi .env)
 ├── css/
@@ -50,9 +53,25 @@ Kamera browser hanya diizinkan pada `localhost` atau HTTPS, jadi buka aplikasi m
 node server.js
 ```
 
-Lalu buka `http://localhost:8000`. Server ini membaca `.env` dan menyuntikkannya sebagai `/js/config.js` — tidak ada file rahasia yang tertulis ke disk.
+Lalu buka `http://localhost:8000`. Server ini membaca `.env` dan menyuntikkannya sebagai `/api/config.js` — tidak ada file rahasia yang tertulis ke disk.
 
 > Bisa juga dengan `python -m http.server`, `npx serve`, `php -S`, atau Live Server VS Code, tetapi cara itu **tidak membaca `.env`** sehingga sinkronisasi Supabase aktif hanya melalui `node server.js`.
+
+## Deploy ke Vercel
+
+1. Push repo ke GitHub, lalu import di [vercel.com/new](https://vercel.com/new) (framework preset: **Other**, tanpa build command, output directory: `.`)
+2. Di project Vercel: **Settings → Environment Variables** — tambah:
+
+   | Name | Value |
+   | --- | --- |
+   | `SUPABASE_URL` | `https://xxxxxxxxxxxx.supabase.co` |
+   | `SUPABASE_ANON_KEY` | `eyJhbGciOi...` |
+
+3. **Deployments → Redeploy** (env vars hanya dipakai saat deploy/function berjalan)
+
+Cara kerja di Vercel: `index.html` memuat `/api/config.js`, yaitu serverless function `api/config.js` yang membaca `process.env.SUPABASE_URL` / `SUPABASE_ANON_KEY` lalu menyuntikkannya sebagai `window.APP_CONFIG`. Sama persis dengan `server.js` lokal — `.env` lokal tidak pernah ikut ter-upload.
+
+**Jika `/api/config.js` balas 404 setelah deploy**, berarti Vercel tidak mengenali folder `api/` sebagai functions. Pastikan: **Settings → Build & Development Settings → Framework Preset = Other** (bukan "Other static site" yang menonaktifkan functions), lalu **Redeploy**. Function memakai CommonJS agar terdeteksi tanpa `package.json`.
 
 > Halaman tetap dapat dibuka langsung sebagai file, tetapi fitur kamera akan gagal dan hanya input NIS manual yang tersedia.
 
@@ -157,8 +176,11 @@ Cukup edit `.env` lalu restart `node server.js` — tidak perlu generate apa pun
 ### Cara kerja
 
 - **Push** — setiap tambah/ubah/hapus (CRUD siswa, scan/manual, impor Excel, backup, reset, data demo) masuk antrean lalu dikirim berurutan ke Supabase; jika gagal (offline), antrean disimpan dan dicoba lagi otomatis.
-- **Pull** — startup senyap + tombol sinkron menarik seluruh tabel sebagai sumber kebenaran, lalu menyegarkan halaman aktif.
-- **Server kosong, lokal terisi** — aplikasi mengunggah snapshot lokal sekali sebagai isi awal.
+- **Merge (dua arah)** — saat sinkron, data server dan lokal **digabung, tidak saling menimpa**:
+  - Siswa dicocokkan berdasarkan **NIS**; versi server dipakai sebagai master sehingga id server berlaku.
+  - Absensi dicocokkan berdasarkan **siswa + tanggal**; absensi dari server menang bila bentrok pada tanggal yang sama, absensi lokal yang belum ada diunggah.
+  - Siswa/absensi yang hanya ada di lokal otomatis di-*push* ke server.
+- **Reset/Impor/Data Demo** — tindakan eksplisit ini tetap **mengganti seluruh** isi server (bukan merge), sesuai maksud tombolnya.
 - Batalkan sinkron: kosongkan nilai di `.env` lalu restart `node server.js` (data lokal utuh).
 
 ### Catatan keamanan
@@ -171,6 +193,7 @@ Cukup edit `.env` lalu restart `node server.js` — tidak perlu generate apa pun
 | Gejala | Penyebab umum |
 | --- | --- |
 | Pill tidak muncul / "Mode lokal" | Aplikasi dibuka bukan lewat `node server.js`, `.env` kosong, atau CDN `supabase-js` gagal dimuat |
+| Pill "Supabase tidak termuat" di production | `/api/config.js` 404 — folder `api/` tak dikenali Vercel; set Framework Preset = Other lalu redeploy |
 | `relation "public.students" does not exist` | `supabase/schema.sql` belum dijalankan |
 | Status `Offline · N antre` | Tidak ada internet / URL key salah; antrean dikirim ulang otomatis |
 | Data server hilang setelah pull | Perangkat lain mendorong `replaceAllData` (impor/seed) — snapshot diganti |

@@ -2,7 +2,8 @@
  *
  * Jalankan:  node server.js
  * Membaca .env (SUPABASE_URL, SUPABASE_ANON_KEY) lalu menyajikan
- * /js/config.js secara virtual dari nilai tersebut.
+ * /api/config.js secara virtual dari nilai tersebut (sama seperti
+ * function Vercel di api/config.js yang membaca process.env).
  * Tidak ada file config yang ditulis ke disk — .env cukup satu-satunya sumber.
  */
 const http = require('http');
@@ -55,7 +56,7 @@ function configJs() {
 const server = http.createServer((req, res) => {
   const urlPath = decodeURIComponent((req.url || '/').split('?')[0]);
 
-  if (urlPath === '/js/config.js') {
+  if (urlPath === '/api/config.js' || urlPath === '/js/config.js') {
     res.writeHead(200, { 'Content-Type': MIME['.js'], 'Cache-Control': 'no-store' });
     res.end(configJs());
     return;

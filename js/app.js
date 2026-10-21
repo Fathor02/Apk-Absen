@@ -128,6 +128,12 @@
     const pill = $('syncStatus');
     if (!pill) return;
     if (!state || !state.enabled) {
+      if (state && state.misconfigured) {
+        pill.innerHTML = '<span class="h-1.5 w-1.5 rounded-full bg-amber-500"></span>Supabase tidak termuat';
+        pill.classList.remove('hidden');
+        pill.classList.add('flex');
+        return;
+      }
       pill.classList.add('hidden');
       pill.classList.remove('flex');
       return;

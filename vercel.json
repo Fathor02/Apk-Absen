@@ -1,0 +1,10 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "outputDirectory": ".",
+  "functions": {
+    "api/config.js": {
+      "memory": 128,
+      "maxDuration": 10
+    }
+  }
+}

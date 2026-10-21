@@ -221,8 +221,13 @@
     status: client ? 'idle' : 'local',
     pending: 0,
     lastSync: 0,
-    host: client ? SUPABASE_URL.replace(/^https?:\/\//, '').split('/')[0] : ''
+    host: client ? SUPABASE_URL.replace(/^https?:\/\//, '').split('/')[0] : '',
+    misconfigured: !client && !!(window.APP_CONFIG && Object.keys(window.APP_CONFIG).length) && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1'
   };
+
+  if (syncState.misconfigured) {
+    console.warn('[AbsenSiswa] Supabase tidak aktif di production. /api/config.js kemungkinan gagal dimuat — cek Environment Variables Vercel (SUPABASE_URL, SUPABASE_ANON_KEY) lalu redeploy.');
+  }
 
   function getSyncState() {
     return Object.assign({}, syncState);
@@ -298,13 +303,13 @@
     let res;
     switch (job.op) {
       case 'upsertStudent':
-        res = await client.from('students').upsert(job.payload);
+        res = await client.from('students').upsert(job.payload, { onConflict: 'id' });
         break;
       case 'deleteStudent':
         res = await client.from('students').delete().eq('id', job.payload);
         break;
       case 'upsertAttendance':
-        res = await client.from('attendance').upsert(job.payload);
+        res = await client.from('attendance').upsert(job.payload, { onConflict: 'student_id,date' });
         break;
       case 'deleteAttendance':
         res = await client.from('attendance').delete().eq('id', job.payload);
@@ -325,11 +330,11 @@
         const delStudents = await client.from('students').delete().not('id', 'is', null);
         if (delStudents.error) throw delStudents.error;
         for (const rows of chunk(job.payload.students, 200)) {
-          const r = await client.from('students').upsert(rows);
+          const r = await client.from('students').upsert(rows, { onConflict: 'id' });
           if (r.error) throw r.error;
         }
         for (const rows of chunk(job.payload.attendance, 200)) {
-          const r = await client.from('attendance').upsert(rows);
+          const r = await client.from('attendance').upsert(rows, { onConflict: 'student_id,date' });
           if (r.error) throw r.error;
         }
         res = await client.from('settings').upsert(job.payload.settings);
@@ -379,7 +384,7 @@
       }
       setSync({ status: 'synced', lastSync: Date.now() });
     } catch (err) {
-      console.error('Gagal sinkron ke Supabase:', err);
+      console.error('Gagal sinkron ke Supabase:', err && err.message ? err.message : err, err && err.details ? err.details : '', err && err.hint ? err.hint : '', err && err.code ? 'code=' + err.code : '');
       setSync({ status: 'offline' });
       scheduleFlush(20000);
     } finally {
@@ -387,30 +392,86 @@
     }
   }
 
+  const PAGE_SIZE = 1000;
+
+  async function selectAll(table, orderColumn) {
+    const rows = [];
+    let from = 0;
+    for (;;) {
+      let query = client.from(table).select('*').range(from, from + PAGE_SIZE - 1);
+      if (orderColumn) query = query.order(orderColumn, { ascending: true });
+      const res = await query;
+      if (res.error) throw res.error;
+      const batch = res.data || [];
+      rows.push(...batch);
+      if (batch.length < PAGE_SIZE) break;
+      from += PAGE_SIZE;
+    }
+    return rows;
+  }
+
   async function pullAll() {
-    const studentsRes = await client.from('students').select('*');
-    if (studentsRes.error) throw studentsRes.error;
-    const attendanceRes = await client.from('attendance').select('*');
-    if (attendanceRes.error) throw attendanceRes.error;
+    const remoteStudents = (await selectAll('students', 'id')).map(rowToStudent);
+    const remoteAttendance = (await selectAll('attendance', 'id')).map(rowToAttendance);
     const settingsRes = await client.from('settings').select('*').limit(1);
     if (settingsRes.error) throw settingsRes.error;
-
-    const nextStudents = (studentsRes.data || []).map(rowToStudent);
-    const nextAttendance = (attendanceRes.data || []).map(rowToAttendance);
     const settingsFromServer = (settingsRes.data || [])[0];
 
-    const remoteEmpty = !nextStudents.length && !nextAttendance.length;
-    const localHasData = data.students.length > 0 || data.attendance.length > 0;
-    if (remoteEmpty && localHasData) {
-      enqueueSync('replaceAllData', buildReplacePayload());
-      scheduleFlush(0);
-      return;
-    }
+    /* Merge dua arah: server dan lokal digabung, tidak saling menimpa.
+       - Siswa: kunci NIS; bila ada di server, id server dipakai sebagai master.
+       - Absensi: kunci studentId + date. Absensi lokal dipetakan ulang ke id
+         siswa master (berdasarkan NIS) agar tidak menjadi yatim saat id lokal
+         digantikan id server. Server menang bila bentrok pada tanggal sama. */
+    const byNisStudents = new Map();
+    data.students.forEach((s) => {
+      const k = String(s.nis).toLowerCase();
+      if (!byNisStudents.has(k)) byNisStudents.set(k, s);
+    });
+    const localIdByNis = new Map();
+    data.students.forEach((s) => localIdByNis.set(String(s.nis).toLowerCase(), s.id));
+    const remoteIdByNis = new Map();
+    remoteStudents.forEach((s) => remoteIdByNis.set(String(s.nis).toLowerCase(), s.id));
 
-    data.students = nextStudents;
-    data.attendance = nextAttendance;
-    if (settingsFromServer) data.settings = rowToSettings(settingsFromServer);
+    remoteStudents.forEach((s) => byNisStudents.set(String(s.nis).toLowerCase(), s));
+    const mergedStudents = Array.from(byNisStudents.values());
+
+    const remoteStudentIds = new Set(remoteStudents.map((s) => s.id));
+
+    const mergedAttendanceMap = new Map();
+    remoteAttendance.forEach((a) => mergedAttendanceMap.set(`${a.studentId}|${a.date}`, a));
+    /* Pasangan yang hanya berasal dari data lokal (perlu di-*push* ke server). */
+    const pairsToUpload = new Set();
+    data.attendance.forEach((a) => {
+      /* Pindahkan absensi lokal ke id siswa master bila id-nya berbeda. */
+      let studentId = a.studentId;
+      if (!remoteStudentIds.has(studentId)) {
+        const nis = [...localIdByNis.entries()].find(([, id]) => id === studentId);
+        if (nis && remoteIdByNis.has(nis[0])) studentId = remoteIdByNis.get(nis[0]);
+      }
+      const pair = `${studentId}|${a.date}`;
+      if (mergedAttendanceMap.has(pair)) return;
+      mergedAttendanceMap.set(pair, Object.assign({}, a, { studentId }));
+      pairsToUpload.add(pair);
+    });
+    const mergedAttendance = Array.from(mergedAttendanceMap.values());
+
+    data.students = mergedStudents;
+    data.attendance = mergedAttendance;
+    if (settingsFromServer) {
+      data.settings = normalizeSettings(Object.assign({}, data.settings, rowToSettings(settingsFromServer)));
+    }
     persist();
+
+    /* Unggah siswa & absensi yang hanya ada di lokal. */
+    const studentsToUpload = data.students.filter((s) => !remoteIdByNis.has(String(s.nis).toLowerCase()));
+    studentsToUpload.forEach((s) => enqueueSync('upsertStudent', studentRow(s)));
+
+    data.attendance.forEach((a) => {
+      if (!pairsToUpload.has(`${a.studentId}|${a.date}`)) return;
+      enqueueSync('upsertAttendance', attendanceRow(a));
+    });
+
+    if (studentsToUpload.length) scheduleFlush(0);
   }
 
   async function syncNow(options) {
@@ -425,6 +486,7 @@
     try {
       await flushQueue();
       await pullAll();
+      await flushQueue();
       setSync({ status: 'synced', lastSync: Date.now() });
       if (App.refreshPage) App.refreshPage();
       if (!silent) utils.toast('Data berhasil disinkronkan dengan Supabase.', 'success', 'Sinkronisasi selesai');

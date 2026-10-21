@@ -179,7 +179,9 @@
     if (!el) return;
     const sync = DB.getSyncState ? DB.getSyncState() : { enabled: false };
     if (!sync.enabled) {
-      el.textContent = 'Mode lokal — belum dikonfigurasi.';
+      el.textContent = sync.misconfigured
+        ? 'Gagal memuat konfigurasi. Cek Environment Variables Vercel lalu redeploy.'
+        : 'Mode lokal — belum dikonfigurasi.';
       return;
     }
     const last = sync.lastSync ? new Date(sync.lastSync).toLocaleTimeString('id-ID') : 'belum pernah';
