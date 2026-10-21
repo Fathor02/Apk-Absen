@@ -14,6 +14,10 @@
 
   const STATUS_KEYS = ['hadir', 'telat', 'izin', 'sakit', 'alpa'];
 
+  /* Tombstone: jejak penghapusan lokal agar "pull" tidak menghidupkan kembali
+     data yang sengaja dihapus di perangkat ini. Dipangkas otomatis setelah TTL. */
+  const TOMBSTONE_TTL = 7 * 24 * 60 * 60 * 1000;
+
   const DEMO_STUDENTS = [
     ['2026001', 'Ahmad Fauzan', 'VII A'],
     ['2026002', 'Aisyah Putri', 'VII A'],
@@ -76,6 +80,35 @@
     }
     settings.schoolName = String(settings.schoolName).trim().slice(0, 80);
     return settings;
+  }
+
+  function normalizeTombstones(value) {
+    if (!Array.isArray(value)) return [];
+    const now = Date.now();
+    const seen = new Set();
+    const out = [];
+    value.forEach((item) => {
+      if (!item || !item.id) return;
+      const id = String(item.id);
+      if (seen.has(id)) return;
+      const at = Number(item.at) || now;
+      if (now - at > TOMBSTONE_TTL) return;
+      seen.add(id);
+      out.push({ id, at });
+    });
+    return out;
+  }
+
+  function addTombstone(listName, id) {
+    const list = normalizeTombstones(data[listName]);
+    const key = String(id);
+    if (!list.some((item) => item.id === key)) list.push({ id: key, at: Date.now() });
+    data[listName] = list;
+  }
+
+  function clearTombstone(listName, id) {
+    const key = String(id);
+    data[listName] = data[listName].filter((item) => item.id !== key);
   }
 
   function mulberry32(seed) {
@@ -158,7 +191,9 @@
       version: VERSION,
       students,
       attendance: buildDemoAttendance(students),
-      settings: normalizeSettings(settings)
+      settings: normalizeSettings(settings),
+      deletedStudents: [],
+      deletedAttendance: []
     };
   }
 
@@ -174,7 +209,9 @@
         version: VERSION,
         students: parsed.students,
         attendance: parsed.attendance,
-        settings: normalizeSettings(parsed.settings)
+        settings: normalizeSettings(parsed.settings),
+        deletedStudents: normalizeTombstones(parsed.deletedStudents),
+        deletedAttendance: normalizeTombstones(parsed.deletedAttendance)
       };
     } catch (err) {
       console.error('Gagal membaca data absensi:', err);
@@ -307,12 +344,23 @@
         break;
       case 'deleteStudent':
         res = await client.from('students').delete().eq('id', job.payload);
+        if (!res.error) {
+          clearTombstone('deletedStudents', job.payload);
+          persist();
+        }
         break;
       case 'upsertAttendance':
         res = await client.from('attendance').upsert(job.payload, { onConflict: 'student_id,date' });
         break;
       case 'deleteAttendance':
         res = await client.from('attendance').delete().eq('id', job.payload);
+        if (!res.error) {
+          clearTombstone('deletedAttendance', job.payload);
+          persist();
+        }
+        break;
+      case 'deleteAttendanceByStudent':
+        res = await client.from('attendance').delete().eq('student_id', job.payload);
         break;
       case 'deleteAttendanceByStudentDate':
         res = await client
@@ -371,8 +419,17 @@
     }, delay);
   }
 
-  async function flushQueue() {
-    if (!client || flushing) return;
+  async function flushQueue(force) {
+    if (!client) return;
+    if (flushTimer) {
+      clearTimeout(flushTimer);
+      flushTimer = null;
+    }
+    if (flushing) {
+      if (!force) return;
+      /* Tunggu percobaan yang sedang berjalan selesai sebelum mencoba lagi. */
+      while (flushing) await new Promise((resolve) => setTimeout(resolve, 50));
+    }
     flushing = true;
     setSync({ status: 'syncing' });
     try {
@@ -411,17 +468,51 @@
   }
 
   async function pullAll() {
-    const remoteStudents = (await selectAll('students', 'id')).map(rowToStudent);
-    const remoteAttendance = (await selectAll('attendance', 'id')).map(rowToAttendance);
+    const remoteStudentsAll = (await selectAll('students', 'id')).map(rowToStudent);
+    const remoteAttendanceAll = (await selectAll('attendance', 'id')).map(rowToAttendance);
     const settingsRes = await client.from('settings').select('*').limit(1);
     if (settingsRes.error) throw settingsRes.error;
     const settingsFromServer = (settingsRes.data || [])[0];
+
+    /* Buang siswa yang dihapus lokal (tombstone) supaya tidak dihidupkan kembali.
+       Siswa yang tersaring juga menyaring absensinya dari server. */
+    const deletedStudentIds = new Set(data.deletedStudents.map((item) => item.id));
+    const deletedAttendanceIds = new Set(data.deletedAttendance.map((item) => item.id));
+    const remoteStudents = remoteStudentsAll.filter((s) => !deletedStudentIds.has(s.id));
+    const remoteAttendance = remoteAttendanceAll.filter(
+      (a) => !deletedAttendanceIds.has(a.id) && !deletedStudentIds.has(a.studentId)
+    );
+
+    /* Tandai tombstone siswa yang SUDAH tidak ada di server (hapusan tuntas). */
+    const remoteStudentIdSet = new Set(remoteStudentsAll.map((s) => s.id));
+    const resolvedStudentTombstones = data.deletedStudents.filter((item) => !remoteStudentIdSet.has(item.id));
+    if (resolvedStudentTombstones.length) {
+      const resolved = new Set(resolvedStudentTombstones.map((item) => item.id));
+      data.deletedStudents = data.deletedStudents.filter((item) => !resolved.has(item.id));
+    }
+    const remoteAttendanceIdSet = new Set(remoteAttendanceAll.map((a) => a.id));
+    const resolvedAttendanceTombstones = data.deletedAttendance.filter((item) => !remoteAttendanceIdSet.has(item.id));
+    if (resolvedAttendanceTombstones.length) {
+      const resolved = new Set(resolvedAttendanceTombstones.map((item) => item.id));
+      data.deletedAttendance = data.deletedAttendance.filter((item) => !resolved.has(item.id));
+    }
+
+    /* Tombstone yang datanya MASIH ada di server harus dihapus ulang: antrean
+       sync bersifat in-memory dan hilang saat halaman di-refresh. */
+    const studentTombstonesToRetry = data.deletedStudents.filter((item) => remoteStudentIdSet.has(item.id));
+    const attendanceTombstonesToRetry = data.deletedAttendance.filter((item) => remoteAttendanceIdSet.has(item.id));
+    studentTombstonesToRetry.forEach((item) => {
+      enqueueSync('deleteStudent', item.id);
+      enqueueSync('deleteAttendanceByStudent', item.id);
+    });
+    attendanceTombstonesToRetry.forEach((item) => enqueueSync('deleteAttendance', item.id));
 
     /* Merge dua arah: server dan lokal digabung, tidak saling menimpa.
        - Siswa: kunci NIS; bila ada di server, id server dipakai sebagai master.
        - Absensi: kunci studentId + date. Absensi lokal dipetakan ulang ke id
          siswa master (berdasarkan NIS) agar tidak menjadi yatim saat id lokal
-         digantikan id server. Server menang bila bentrok pada tanggal sama. */
+         digantikan id server. Server menang bila bentrok pada tanggal sama.
+       - Siswa/absensi yang ber-tombstone tidak pernah dimasukkan kembali. */
     const byNisStudents = new Map();
     data.students.forEach((s) => {
       const k = String(s.nis).toLowerCase();
@@ -484,9 +575,9 @@
     }
     setSync({ status: 'syncing' });
     try {
-      await flushQueue();
+      await flushQueue(true);
       await pullAll();
-      await flushQueue();
+      await flushQueue(true);
       setSync({ status: 'synced', lastSync: Date.now() });
       if (App.refreshPage) App.refreshPage();
       if (!silent) utils.toast('Data berhasil disinkronkan dengan Supabase.', 'success', 'Sinkronisasi selesai');
@@ -586,10 +677,12 @@
     deleteStudent(id) {
       const student = findStudentRecord(id);
       if (!student) return false;
+      addTombstone('deletedStudents', id);
       data.students = data.students.filter((item) => item.id !== id);
       data.attendance = data.attendance.filter((item) => item.studentId !== id);
       persist();
       enqueueSync('deleteStudent', id);
+      enqueueSync('deleteAttendanceByStudent', id);
       return true;
     },
     getAttendanceByDate(date) {
@@ -641,16 +734,20 @@
     },
     deleteAttendance(id) {
       const before = data.attendance.length;
+      const record = data.attendance.find((item) => item.id === id);
       data.attendance = data.attendance.filter((item) => item.id !== id);
       if (data.attendance.length === before) return false;
+      if (record) addTombstone('deletedAttendance', id);
       persist();
       enqueueSync('deleteAttendance', id);
       return true;
     },
     deleteAttendanceForStudentDate(studentId, date) {
       const before = data.attendance.length;
+      const removed = data.attendance.filter((item) => item.studentId === studentId && item.date === date);
       data.attendance = data.attendance.filter((item) => !(item.studentId === studentId && item.date === date));
       if (data.attendance.length === before) return false;
+      removed.forEach((item) => addTombstone('deletedAttendance', item.id));
       persist();
       enqueueSync('deleteAttendanceByStudentDate', { studentId, date });
       return true;
@@ -758,7 +855,9 @@
         version: VERSION,
         students,
         attendance: Array.from(attendanceMap.values()),
-        settings: normalizeSettings(root.settings)
+        settings: normalizeSettings(root.settings),
+        deletedStudents: [],
+        deletedAttendance: []
       };
       persist();
       enqueueSync('replaceAllData', buildReplacePayload());
@@ -766,6 +865,7 @@
     },
     resetAttendance() {
       data.attendance = [];
+      data.deletedAttendance = [];
       persist();
       enqueueSync('resetRemote');
     },
@@ -777,6 +877,8 @@
     clearAll() {
       data.students = [];
       data.attendance = [];
+      data.deletedStudents = [];
+      data.deletedAttendance = [];
       persist();
       enqueueSync('clearRemote');
     },
