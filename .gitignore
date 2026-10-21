@@ -1,0 +1,6 @@
+# Rahasia — jangan pernah di-commit
+.env
+
+# Cadangan: file ini tidak lagi dipakai (config disuntik server.js dari .env),
+# tapi tetap di-ignore kalau ada yang membuatnya secara manual.
+js/config.js

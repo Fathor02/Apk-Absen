@@ -1,0 +1,183 @@
+html {
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  text-rendering: optimizeLegibility;
+}
+
+/* Navigation */
+.nav-link {
+  position: relative;
+}
+
+.nav-link.active {
+  background: linear-gradient(90deg, rgba(99, 102, 241, 0.2), rgba(99, 102, 241, 0.06));
+  color: #ffffff;
+  box-shadow: inset 0 0 0 1px rgba(129, 140, 248, 0.18);
+}
+
+.nav-link.active svg {
+  color: #a5b4fc;
+}
+
+.nav-link.active::after {
+  content: "";
+  position: absolute;
+  right: 12px;
+  height: 6px;
+  width: 6px;
+  border-radius: 9999px;
+  background: #818cf8;
+  box-shadow: 0 0 10px rgba(129, 140, 248, 0.8);
+}
+
+/* Page transition */
+.page:not(.hidden) {
+  animation: page-in 0.28s ease-out both;
+}
+
+@keyframes page-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Scanner (html5-qrcode) overrides */
+#reader {
+  background: #020617;
+  color: #e2e8f0;
+}
+
+#reader video {
+  display: block;
+  width: 100% !important;
+  height: auto !important;
+  border-radius: 1rem;
+}
+
+#reader__scan_region {
+  background: #020617;
+  min-height: 280px;
+}
+
+#reader [id^="reader__dashboard"],
+#reader__header_message,
+#reader__status_span,
+#reader img[alt="Info icon"],
+#reader img[alt="Camera"] {
+  display: none !important;
+}
+
+#reader__scan_region img {
+  display: none;
+}
+
+/* Scan feedback flash */
+.scan-flash-success {
+  opacity: 1 !important;
+  background: radial-gradient(circle, rgba(16, 185, 129, 0) 35%, rgba(16, 185, 129, 0.35) 100%);
+  box-shadow: inset 0 0 0 4px rgba(16, 185, 129, 0.9);
+}
+
+.scan-flash-error {
+  opacity: 1 !important;
+  background: radial-gradient(circle, rgba(244, 63, 94, 0) 35%, rgba(244, 63, 94, 0.35) 100%);
+  box-shadow: inset 0 0 0 4px rgba(244, 63, 94, 0.9);
+}
+
+.scan-flash-info {
+  opacity: 1 !important;
+  background: radial-gradient(circle, rgba(56, 189, 248, 0) 35%, rgba(56, 189, 248, 0.28) 100%);
+  box-shadow: inset 0 0 0 4px rgba(56, 189, 248, 0.85);
+}
+
+/* Toast */
+.toast-enter {
+  animation: toast-in 0.26s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.toast-leave {
+  animation: toast-out 0.2s ease-in forwards;
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(-8px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes toast-out {
+  to { opacity: 0; transform: translateX(12px); }
+}
+
+/* Dialog */
+dialog {
+  margin: auto;
+}
+
+dialog[open] {
+  animation: dialog-in 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes dialog-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+dialog::backdrop {
+  background: rgba(2, 6, 23, 0.62);
+  backdrop-filter: blur(4px);
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Date/time inputs */
+input[type="date"],
+input[type="time"] {
+  color-scheme: light;
+}
+
+input::placeholder {
+  color: #94a3b8;
+}
+
+/* Print card fallback */
+@media print {
+  #sidebar,
+  #sidebarOverlay,
+  header,
+  footer,
+  #toast-container {
+    display: none !important;
+  }
+}
