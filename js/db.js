@@ -4,7 +4,8 @@
 
   const App = window.App;
   const utils = App.utils;
-  const KEY = 'absensi_siswa_v1';
+  const KEY = 'absensi_siswa_v2';
+  const LEGACY_KEY = 'absensi_siswa_v1';
   const VERSION = 1;
 
   const DEFAULT_SETTINGS = {
@@ -17,33 +18,6 @@
   /* Tombstone: jejak penghapusan lokal agar "pull" tidak menghidupkan kembali
      data yang sengaja dihapus di perangkat ini. Dipangkas otomatis setelah TTL. */
   const TOMBSTONE_TTL = 7 * 24 * 60 * 60 * 1000;
-
-  const DEMO_STUDENTS = [
-    ['2026001', 'Ahmad Fauzan', 'VII A'],
-    ['2026002', 'Aisyah Putri', 'VII A'],
-    ['2026003', 'Bagas Pratama', 'VII A'],
-    ['2026004', 'Citra Kirana', 'VII A'],
-    ['2026005', 'Dimas Saputra', 'VII A'],
-    ['2026006', 'Elsa Novita', 'VII A'],
-    ['2026007', 'Farhan Maulana', 'VII A'],
-    ['2026008', 'Gita Lestari', 'VII A'],
-    ['2026009', 'Hafiz Ramadhan', 'VII A'],
-    ['2026010', 'Intan Permata', 'VII A'],
-    ['2026011', 'Joko Susilo', 'VII B'],
-    ['2026012', 'Kartika Sari', 'VII B'],
-    ['2026013', 'Lukman Hakim', 'VII B'],
-    ['2026014', 'Mutiara Ayu', 'VII B'],
-    ['2026015', 'Naufal Arif', 'VII B'],
-    ['2026016', 'Olivia Rahma', 'VII B'],
-    ['2026017', 'Putra Wijaya', 'VII B'],
-    ['2026018', 'Qonita Zahra', 'VII B'],
-    ['2026019', 'Raka Firmansyah', 'VIII A'],
-    ['2026020', 'Salsabila Nuraini', 'VIII A'],
-    ['2026021', 'Taufik Hidayat', 'VIII A'],
-    ['2026022', 'Ulfa Khairunnisa', 'VIII A'],
-    ['2026023', 'Vino Alfarizi', 'VIII A'],
-    ['2026024', 'Wulan Sari', 'VIII A']
-  ];
 
   function uid() {
     try {
@@ -111,86 +85,11 @@
     data[listName] = data[listName].filter((item) => item.id !== key);
   }
 
-  function mulberry32(seed) {
-    let a = seed >>> 0;
-    return function random() {
-      a |= 0;
-      a = (a + 0x6D2B79F5) | 0;
-      let t = Math.imul(a ^ (a >>> 15), 1 | a);
-      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
-  }
-
-  function randomTime(rng, startMinutes, endMinutes) {
-    const minutes = startMinutes + Math.floor(rng() * (endMinutes - startMinutes + 1));
-    return `${pad(Math.floor(minutes / 60))}:${pad(minutes % 60)}:${pad(Math.floor(rng() * 60))}`;
-  }
-
-  function buildDemoAttendance(students) {
-    const records = [];
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const year = today.getFullYear();
-    const month = today.getMonth();
-    const rng = mulberry32(year * 1000 + month * 37 + students.length);
-
-    const cursor = new Date(year, month, 1);
-    while (cursor < today) {
-      const dayOfWeek = cursor.getDay();
-      if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-        const date = utils.dateKey(cursor);
-        students.forEach((student) => {
-          const roll = rng();
-          let status;
-          let time = '';
-          if (roll < 0.8) {
-            status = 'hadir';
-            time = randomTime(rng, 6 * 60 + 32, 7 * 60 + 5);
-          } else if (roll < 0.9) {
-            status = 'telat';
-            time = randomTime(rng, 7 * 60 + 6, 7 * 60 + 45);
-          } else if (roll < 0.94) {
-            status = 'izin';
-          } else if (roll < 0.97) {
-            status = 'sakit';
-          } else {
-            status = 'alpa';
-          }
-          const method = status === 'hadir' || status === 'telat' ? 'scan' : 'manual';
-          let createdAt = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate(), 7, 0, 0);
-          if (time) {
-            const [h, m, s] = time.split(':').map(Number);
-            createdAt = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate(), h, m, s);
-          }
-          records.push({
-            id: uid(),
-            studentId: student.id,
-            date,
-            time,
-            status,
-            method,
-            createdAt: createdAt.toISOString()
-          });
-        });
-      }
-      cursor.setDate(cursor.getDate() + 1);
-    }
-    return records;
-  }
-
-  function createDemoData(settings) {
-    const students = DEMO_STUDENTS.map(([nis, name, className]) => ({
-      id: uid(),
-      nis,
-      name,
-      class: className,
-      createdAt: new Date().toISOString()
-    }));
+  function createEmptyData(settings) {
     return {
       version: VERSION,
-      students,
-      attendance: buildDemoAttendance(students),
+      students: [],
+      attendance: [],
       settings: normalizeSettings(settings),
       deletedStudents: [],
       deletedAttendance: []
@@ -232,8 +131,16 @@
 
   let data = loadData();
   if (!data) {
-    data = createDemoData();
+    data = createEmptyData();
     persist();
+  }
+
+  /* Buang cache versi lama (v1) yang masih memuat data contoh agar tidak
+     ter-push kembali ke server saat sinkron. */
+  try {
+    localStorage.removeItem(LEGACY_KEY);
+  } catch (err) {
+    /* abaikan: penyimpanan mungkin diblokir */
   }
 
   /* ---------- Supabase sync (offline-first: cache lokal + push background) ---------- */
@@ -910,11 +817,6 @@
       data.deletedAttendance = [];
       persist();
       enqueueSync('resetRemote');
-    },
-    seedDemo() {
-      data = createDemoData(data.settings);
-      persist();
-      enqueueSync('replaceAllData', buildReplacePayload());
     },
     clearAll() {
       data.students = [];

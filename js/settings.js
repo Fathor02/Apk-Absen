@@ -116,7 +116,6 @@
     const exportBtn = $('backupExport');
     const importBtn = $('backupImportBtn');
     const importInput = $('backupImport');
-    const seedBtn = $('btnSeedDemo');
     const resetBtn = $('btnResetAttendance');
     const clearBtn = $('btnClearAll');
     const syncBtn = $('btnSyncNow');
@@ -128,16 +127,6 @@
     if (importBtn && importInput) {
       importBtn.addEventListener('click', () => importInput.click());
       importInput.addEventListener('change', () => importBackup(importInput.files && importInput.files[0]));
-    }
-
-    if (seedBtn) {
-      seedBtn.addEventListener('click', () => {
-        const ok = window.confirm('Ganti seluruh data siswa dan absensi dengan data contoh?');
-        if (!ok) return;
-        DB.seedDemo();
-        utils.toast('Data contoh berhasil dimuat. Memuat ulang...', 'success');
-        setTimeout(() => window.location.reload(), 700);
-      });
     }
 
     if (resetBtn) {

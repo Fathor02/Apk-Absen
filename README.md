@@ -12,7 +12,7 @@ Aplikasi absensi siswa berbasis web (satu halaman) yang berjalan sepenuhnya di b
 - **Data siswa** — tambah, ubah, hapus, pencarian, filter kelas, validasi NIS unik, serta pembuatan **QR Code** dan **Barcode CODE128**.
 - **Import massal** — tambah banyak siswa sekaligus dari file **Excel (.xlsx/.xls)** atau **CSV**; **template XLSX & CSV** bisa diunduh langsung dari dialog import; baris pertama adalah judul kolom `NIS`, `Nama`, `Kelas`; baris kosong dilewati dan NIS ganda tidak diduplikasi.
 - **Cetak kartu** — kartu siswa berisi QR dan barcode siap cetak.
-- **Pengaturan** — nama sekolah, batas jam masuk, backup/restore JSON, muat data demo, reset absensi, dan hapus semua data.
+- **Pengaturan** — nama sekolah, batas jam masuk, backup/restore JSON, reset absensi, dan hapus semua data.
 - **Kunci admin** — Dashboard terbuka untuk semua, halaman lain wajib **login admin** lebih dulu (session per-tab, bisa keluar lewat tombol di sidebar).
 - **Sinkronisasi Supabase (opsional)** — mode offline-first: bekerja penuh secara lokal, lalu mendorong/menarik data ke/from Supabase di background (lihat bagian [Sinkronisasi Supabase](#sinkronisasi-supabase)).
 
@@ -30,7 +30,8 @@ Aplikasi Absen/
 ├── css/
 │   └── styles.css          # Animasi, state navigasi, override scanner & toast
 ├── supabase/
-│   └── schema.sql          # Skema + RLS + seed demo untuk SQL Editor Supabase
+│   ├── schema.sql          # Skema + RLS + seed data siswa untuk SQL Editor Supabase
+│   └── cleanup-demo.sql    # Soft-delete sisa data contoh di server (jalan sekali)
 └── js/
     ├── utils.js            # Helper tanggal/waktu, toast, suara, unduhan, escape HTML
     ├── db.js               # Lapisan data localStorage + antrean sinkron Supabase
@@ -90,7 +91,9 @@ Dashboard dapat dibuka tanpa login, tetapi halaman **Scan, Absensi Manual, Rekap
 
 ## Penyimpanan Data
 
-Kunci `localStorage`: `absensi_siswa_v1`
+Kunci `localStorage`: `absensi_siswa_v2`
+
+> Kunci lama `absensi_siswa_v1` (yang pernah memuat data contoh) otomatis dibuang saat aplikasi dibuka.
 
 ```json
 {
@@ -98,9 +101,9 @@ Kunci `localStorage`: `absensi_siswa_v1`
   "students": [
     {
       "id": "uuid",
-      "nis": "2026001",
-      "name": "Ahmad Fauzan",
-      "class": "VII A",
+      "nis": "2989",
+      "name": "Ahmad Zamir Fairus K",
+      "class": "VII",
       "createdAt": "2026-10-19T00:00:00.000Z"
     }
   ],
@@ -125,11 +128,16 @@ Kunci `localStorage`: `absensi_siswa_v1`
 - `status`: `hadir` | `telat` | `izin` | `sakit` | `alpa`
 - `method`: `scan` | `manual`
 - Satu siswa hanya memiliki satu catatan per tanggal; scan/input ulang akan memperbarui catatan tersebut.
-- Kode QR/barcode berisi **NIS**. Pemindai juga menerima format `NIS:2026001`.
+- Kode QR/barcode berisi **NIS**. Pemindai juga menerima format `NIS:2989`.
 
-## Data Demo
+## Data Awal
 
-Saat pertama dibuka, aplikasi memuat 24 siswa pada kelas `VII A`, `VII B`, dan `VIII A`, beserta riwayat absensi hari kerja bulan sebelumnya. Hari ini sengaja dikosongkan agar fitur scan dapat dicoba. Data demo dapat dimuat ulang dari **Pengaturan → Muat Data Demo**.
+Aplikasi **tidak lagi membuat data contoh**. Saat pertama dibuka, daftar siswa kosong dan hanya terisi dari:
+
+- **Supabase** — data siswa di server (lihat bagian [Sinkronisasi Supabase](#sinkronisasi-supabase)), atau
+- **manual** — tambah satu per satu di halaman **Data Siswa**, atau impor massal dari Excel/CSV.
+
+Kalau sebelumnya masih ada data contoh tertinggal di server, jalankan sekali `supabase/cleanup-demo.sql` di Supabase SQL Editor (soft-delete, agar tidak muncul kembali).
 
 ## Library (CDN)
 
@@ -152,7 +160,7 @@ Aplikasi tetap berjalan penuh **tanpa** Supabase (mode lokal). Saat dikonfiguras
 ### 1. Buat proyek & jalankan skema
 
 1. Buat proyek gratis di [supabase.com](https://supabase.com).
-2. Buka **SQL Editor → New query**, tempel isi `supabase/schema.sql`, lalu **Run**. Ini membuat tabel `students`, `attendance`, `settings`, kebijakan RLS untuk `anon`, dan data demo (24 siswa + riwayat bulan lalu).
+2. Buka **SQL Editor → New query**, tempel isi `supabase/schema.sql`, lalu **Run**. Ini membuat tabel `students`, `attendance`, `settings`, kebijakan RLS untuk `anon`, dan mengisi daftar siswa (67 siswa) beserta riwayat absensi hari kerja bulan sebelumnya.
 
 ### 2. Isi konfigurasi (.env)
 
@@ -175,13 +183,13 @@ Cukup edit `.env` lalu restart `node server.js` — tidak perlu generate apa pun
 
 ### Cara kerja
 
-- **Push** — setiap tambah/ubah/hapus (CRUD siswa, scan/manual, impor Excel, backup, reset, data demo) masuk antrean lalu dikirim berurutan ke Supabase; jika gagal (offline), antrean disimpan dan dicoba lagi otomatis.
+- **Push** — setiap tambah/ubah/hapus (CRUD siswa, scan/manual, impor Excel, backup, reset) masuk antrean lalu dikirim berurutan ke Supabase; jika gagal (offline), antrean disimpan dan dicoba lagi otomatis.
 - **Hapus = soft-delete (global)** — menghapus siswa/absensi tidak menghapus baris, melainkan mengisi kolom `deleted_at`. Sinyal hapus ini berlaku untuk **semua perangkat**: setiap perangkat yang menarik data akan ikut menghapusnya dari cache lokal dan **tidak** mengunggahnya kembali. Ini memungkinkan penghapusan dari web, dari perangkat lain, maupun langsung di Table Editor Supabase. Baris yang sudah `deleted_at` juga ditahan oleh *tombstone* lokal agar tidak hidup kembali.
 - **Merge (dua arah)** — saat sinkron, data server dan lokal **digabung, tidak saling menimpa** (baris terhapus dikecualikan):
   - Siswa dicocokkan berdasarkan **NIS**; versi server dipakai sebagai master sehingga id server berlaku.
   - Absensi dicocokkan berdasarkan **siswa + tanggal**; absensi dari server menang bila bentrok pada tanggal yang sama, absensi lokal yang belum ada diunggah.
   - Siswa/absensi yang hanya ada di lokal otomatis di-*push* ke server.
-- **Reset/Impor/Data Demo** — tindakan eksplisit ini tetap **mengganti seluruh** isi server (bukan merge, hapus permanen), sesuai maksud tombolnya.
+- **Reset/Impor** — tindakan eksplisit ini tetap **mengganti seluruh** isi server (bukan merge, hapus permanen), sesuai maksud tombolnya.
 - Batalkan sinkron: kosongkan nilai di `.env` lalu restart `node server.js` (data lokal utuh).
 
 > Jika Anda sudah menjalankan skema versi lama (tanpa `deleted_at`), jalankan ulang `supabase/schema.sql` — bagian migrasi `alter table ... add column if not exists deleted_at` aman diulang.
@@ -199,7 +207,8 @@ Cukup edit `.env` lalu restart `node server.js` — tidak perlu generate apa pun
 | Pill "Supabase tidak termuat" di production | `/api/config.js` 404 — folder `api/` tak dikenali Vercel; set Framework Preset = Other lalu redeploy |
 | `relation "public.students" does not exist` | `supabase/schema.sql` belum dijalankan |
 | Status `Offline · N antre` | Tidak ada internet / URL key salah; antrean dikirim ulang otomatis |
-| Data server hilang setelah pull | Perangkat lain mendorong `replaceAllData` (impor/seed) — snapshot diganti |
+| Data server hilang setelah pull | Perangkat lain mendorong `replaceAllData` (impor/backup restore) — snapshot diganti |
+| Data contoh lama muncul kembali | Jalankan `supabase/cleanup-demo.sql` di Supabase SQL Editor, lalu refresh aplikasi |
 
 ## Catatan
 
