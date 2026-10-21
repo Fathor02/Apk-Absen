@@ -46,10 +46,15 @@ create index if not exists students_deleted_idx   on public.students (deleted_at
 create index if not exists attendance_deleted_idx on public.attendance (deleted_at);
 
 -- ---------- RLS (tanpa login: anon boleh baca/tulis) ----------
+-- Idempoten: drop dulu agar file bisa dijalankan ulang tanpa error 42710.
 
 alter table public.students   enable row level security;
 alter table public.attendance enable row level security;
 alter table public.settings   enable row level security;
+
+drop policy if exists "anon akses students"   on public.students;
+drop policy if exists "anon akses attendance" on public.attendance;
+drop policy if exists "anon akses settings"   on public.settings;
 
 create policy "anon akses students"   on public.students   for all to anon using (true) with check (true);
 create policy "anon akses attendance" on public.attendance for all to anon using (true) with check (true);
