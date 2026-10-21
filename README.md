@@ -137,7 +137,10 @@ Aplikasi **tidak lagi membuat data contoh**. Saat pertama dibuka, daftar siswa k
 - **Supabase** — data siswa di server (lihat bagian [Sinkronisasi Supabase](#sinkronisasi-supabase)), atau
 - **manual** — tambah satu per satu di halaman **Data Siswa**, atau impor massal dari Excel/CSV.
 
-Kalau sebelumnya masih ada data contoh tertinggal di server, jalankan sekali `supabase/cleanup-demo.sql` di Supabase SQL Editor (soft-delete, agar tidak muncul kembali).
+Kalau sebelumnya masih ada data contoh tertinggal di server, jalankan `supabase/cleanup-demo.sql` di Supabase SQL Editor. File itu berdua tahap:
+
+- **Tahap 1 — soft-delete (wajib, aman diulang).** Baris ditandai `deleted_at` sehingga tidak muncul lagi di aplikasi, tapi masih terlihat di Table Editor.
+- **Tahap 2 — hapus permanen (opsional).** Menghapus baris data contoh beserta absensinya dari tabel. Jalankan hanya setelah Tahap 1 selesai **dan** semua perangkat sudah hard-refresh (Ctrl+Shift+R), karena versi lama yang masih cached akan membuat data contoh ulang dengan UUID baru lalu mengirimnya ke server sebagai baris aktif.
 
 ## Library (CDN)
 
@@ -208,7 +211,7 @@ Cukup edit `.env` lalu restart `node server.js` — tidak perlu generate apa pun
 | `relation "public.students" does not exist` | `supabase/schema.sql` belum dijalankan |
 | Status `Offline · N antre` | Tidak ada internet / URL key salah; antrean dikirim ulang otomatis |
 | Data server hilang setelah pull | Perangkat lain mendorong `replaceAllData` (impor/backup restore) — snapshot diganti |
-| Data contoh lama muncul kembali | Jalankan `supabase/cleanup-demo.sql` di Supabase SQL Editor, lalu refresh aplikasi |
+| Data contoh lama muncul kembali | Jalankan Tahap 1 `supabase/cleanup-demo.sql` di Supabase SQL Editor, lalu hard-refresh aplikasi (Ctrl+Shift+R) di semua perangkat |
 
 ## Catatan
 
