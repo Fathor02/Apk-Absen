@@ -176,12 +176,15 @@ Cukup edit `.env` lalu restart `node server.js` — tidak perlu generate apa pun
 ### Cara kerja
 
 - **Push** — setiap tambah/ubah/hapus (CRUD siswa, scan/manual, impor Excel, backup, reset, data demo) masuk antrean lalu dikirim berurutan ke Supabase; jika gagal (offline), antrean disimpan dan dicoba lagi otomatis.
-- **Merge (dua arah)** — saat sinkron, data server dan lokal **digabung, tidak saling menimpa**:
+- **Hapus = soft-delete (global)** — menghapus siswa/absensi tidak menghapus baris, melainkan mengisi kolom `deleted_at`. Sinyal hapus ini berlaku untuk **semua perangkat**: setiap perangkat yang menarik data akan ikut menghapusnya dari cache lokal dan **tidak** mengunggahnya kembali. Ini memungkinkan penghapusan dari web, dari perangkat lain, maupun langsung di Table Editor Supabase. Baris yang sudah `deleted_at` juga ditahan oleh *tombstone* lokal agar tidak hidup kembali.
+- **Merge (dua arah)** — saat sinkron, data server dan lokal **digabung, tidak saling menimpa** (baris terhapus dikecualikan):
   - Siswa dicocokkan berdasarkan **NIS**; versi server dipakai sebagai master sehingga id server berlaku.
   - Absensi dicocokkan berdasarkan **siswa + tanggal**; absensi dari server menang bila bentrok pada tanggal yang sama, absensi lokal yang belum ada diunggah.
   - Siswa/absensi yang hanya ada di lokal otomatis di-*push* ke server.
-- **Reset/Impor/Data Demo** — tindakan eksplisit ini tetap **mengganti seluruh** isi server (bukan merge), sesuai maksud tombolnya.
+- **Reset/Impor/Data Demo** — tindakan eksplisit ini tetap **mengganti seluruh** isi server (bukan merge, hapus permanen), sesuai maksud tombolnya.
 - Batalkan sinkron: kosongkan nilai di `.env` lalu restart `node server.js` (data lokal utuh).
+
+> Jika Anda sudah menjalankan skema versi lama (tanpa `deleted_at`), jalankan ulang `supabase/schema.sql` — bagian migrasi `alter table ... add column if not exists deleted_at` aman diulang.
 
 ### Catatan keamanan
 

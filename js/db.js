@@ -288,10 +288,17 @@
   }
 
   function studentRow(student) {
-    return { id: student.id, nis: student.nis, name: student.name, class: student.class, created_at: student.createdAt };
+    return { id: student.id, nis: student.nis, name: student.name, class: student.class, created_at: student.createdAt, deleted_at: null };
   }
   function rowToStudent(row) {
-    return { id: row.id, nis: row.nis, name: row.name, class: row.class, createdAt: row.created_at || new Date().toISOString() };
+    return {
+      id: row.id,
+      nis: row.nis,
+      name: row.name,
+      class: row.class,
+      createdAt: row.created_at || new Date().toISOString(),
+      deletedAt: row.deleted_at || null
+    };
   }
   function attendanceRow(record) {
     return {
@@ -301,7 +308,8 @@
       time: record.time || '',
       status: record.status,
       method: record.method,
-      created_at: record.createdAt
+      created_at: record.createdAt,
+      deleted_at: null
     };
   }
   function rowToAttendance(row) {
@@ -312,7 +320,8 @@
       time: row.time || '',
       status: row.status,
       method: row.method,
-      createdAt: row.created_at || new Date().toISOString()
+      createdAt: row.created_at || new Date().toISOString(),
+      deletedAt: row.deleted_at || null
     };
   }
   function settingsRow(settings) {
@@ -336,6 +345,10 @@
     };
   }
 
+  function softDeletePatch() {
+    return { deleted_at: new Date().toISOString() };
+  }
+
   async function runJob(job) {
     let res;
     switch (job.op) {
@@ -343,7 +356,7 @@
         res = await client.from('students').upsert(job.payload, { onConflict: 'id' });
         break;
       case 'deleteStudent':
-        res = await client.from('students').delete().eq('id', job.payload);
+        res = await client.from('students').update(softDeletePatch()).eq('id', job.payload);
         if (!res.error) {
           clearTombstone('deletedStudents', job.payload);
           persist();
@@ -353,19 +366,19 @@
         res = await client.from('attendance').upsert(job.payload, { onConflict: 'student_id,date' });
         break;
       case 'deleteAttendance':
-        res = await client.from('attendance').delete().eq('id', job.payload);
+        res = await client.from('attendance').update(softDeletePatch()).eq('id', job.payload);
         if (!res.error) {
           clearTombstone('deletedAttendance', job.payload);
           persist();
         }
         break;
       case 'deleteAttendanceByStudent':
-        res = await client.from('attendance').delete().eq('student_id', job.payload);
+        res = await client.from('attendance').update(softDeletePatch()).eq('student_id', job.payload);
         break;
       case 'deleteAttendanceByStudentDate':
         res = await client
           .from('attendance')
-          .delete()
+          .update(softDeletePatch())
           .eq('student_id', job.payload.studentId)
           .eq('date', job.payload.date);
         break;
@@ -474,37 +487,52 @@
     if (settingsRes.error) throw settingsRes.error;
     const settingsFromServer = (settingsRes.data || [])[0];
 
-    /* Buang siswa yang dihapus lokal (tombstone) supaya tidak dihidupkan kembali.
-       Siswa yang tersaring juga menyaring absensinya dari server. */
-    const deletedStudentIds = new Set(data.deletedStudents.map((item) => item.id));
-    const deletedAttendanceIds = new Set(data.deletedAttendance.map((item) => item.id));
-    const remoteStudents = remoteStudentsAll.filter((s) => !deletedStudentIds.has(s.id));
-    const remoteAttendance = remoteAttendanceAll.filter(
-      (a) => !deletedAttendanceIds.has(a.id) && !deletedStudentIds.has(a.studentId)
+    /* Penghapusan global (soft-delete di server): baris ber-`deleted_at`
+       adalah sinyal hapus yang berlaku untuk SEMUA perangkat. Ia diperlakukan
+       sama seperti tombstone lokal sehingga tidak pernah dihidupkan kembali
+       dan tidak pernah diunggah ulang. */
+    const serverDeletedStudentIds = new Set(
+      remoteStudentsAll.filter((s) => s.deletedAt).map((s) => s.id)
+    );
+    const serverDeletedAttendanceIds = new Set(
+      remoteAttendanceAll.filter((a) => a.deletedAt).map((a) => a.id)
     );
 
-    /* Tandai tombstone siswa yang SUDAH tidak ada di server (hapusan tuntas). */
-    const remoteStudentIdSet = new Set(remoteStudentsAll.map((s) => s.id));
-    const resolvedStudentTombstones = data.deletedStudents.filter((item) => !remoteStudentIdSet.has(item.id));
-    if (resolvedStudentTombstones.length) {
-      const resolved = new Set(resolvedStudentTombstones.map((item) => item.id));
-      data.deletedStudents = data.deletedStudents.filter((item) => !resolved.has(item.id));
-    }
-    const remoteAttendanceIdSet = new Set(remoteAttendanceAll.map((a) => a.id));
-    const resolvedAttendanceTombstones = data.deletedAttendance.filter((item) => !remoteAttendanceIdSet.has(item.id));
-    if (resolvedAttendanceTombstones.length) {
-      const resolved = new Set(resolvedAttendanceTombstones.map((item) => item.id));
-      data.deletedAttendance = data.deletedAttendance.filter((item) => !resolved.has(item.id));
-    }
+    /* Rekam sinyal hapus server sebagai tombstone lokal agar pengaman lain
+       (tombstone) ikut menahan kebangkitan data. */
+    serverDeletedStudentIds.forEach((id) => addTombstone('deletedStudents', id));
+    serverDeletedAttendanceIds.forEach((id) => addTombstone('deletedAttendance', id));
 
-    /* Tombstone yang datanya MASIH ada di server harus dihapus ulang: antrean
-       sync bersifat in-memory dan hilang saat halaman di-refresh. */
-    const studentTombstonesToRetry = data.deletedStudents.filter((item) => remoteStudentIdSet.has(item.id));
-    const attendanceTombstonesToRetry = data.deletedAttendance.filter((item) => remoteAttendanceIdSet.has(item.id));
+    /* Buang siswa yang dihapus lokal (tombstone) ATAU di server (soft-delete). */
+    const deletedStudentIds = new Set(data.deletedStudents.map((item) => item.id));
+    const deletedAttendanceIds = new Set(data.deletedAttendance.map((item) => item.id));
+    const removedStudentIds = new Set([...deletedStudentIds, ...serverDeletedStudentIds]);
+    const removedAttendanceIds = new Set([...deletedAttendanceIds, ...serverDeletedAttendanceIds]);
+    const remoteStudents = remoteStudentsAll.filter((s) => !s.deletedAt && !removedStudentIds.has(s.id));
+    const remoteAttendance = remoteAttendanceAll.filter(
+      (a) => !a.deletedAt && !removedAttendanceIds.has(a.id) && !removedStudentIds.has(a.studentId)
+    );
+
+    /* Tombstone yang sudah tuntas (baris sudah tidak ada / sudah soft-delete di
+       server) dipangkas. Sisanya di-*retry* karena antrean sync bersifat
+       in-memory dan hilang saat halaman di-refresh.
+       "Aktif di server" = ada di server TANPA deleted_at, tidak dipengaruhi
+       tombstone lokal (agar tombstone tidak terhapus sebelum hapusan terkirim). */
+    const serverActiveStudentIds = new Set(
+      remoteStudentsAll.filter((s) => !s.deletedAt).map((s) => s.id)
+    );
+    const studentTombstonesToRetry = data.deletedStudents.filter((item) => serverActiveStudentIds.has(item.id));
+    data.deletedStudents = data.deletedStudents.filter((item) => serverActiveStudentIds.has(item.id));
     studentTombstonesToRetry.forEach((item) => {
       enqueueSync('deleteStudent', item.id);
       enqueueSync('deleteAttendanceByStudent', item.id);
     });
+
+    const serverActiveAttendanceIds = new Set(
+      remoteAttendanceAll.filter((a) => !a.deletedAt).map((a) => a.id)
+    );
+    const attendanceTombstonesToRetry = data.deletedAttendance.filter((item) => serverActiveAttendanceIds.has(item.id));
+    data.deletedAttendance = data.deletedAttendance.filter((item) => serverActiveAttendanceIds.has(item.id));
     attendanceTombstonesToRetry.forEach((item) => enqueueSync('deleteAttendance', item.id));
 
     /* Merge dua arah: server dan lokal digabung, tidak saling menimpa.
@@ -515,11 +543,17 @@
        - Siswa/absensi yang ber-tombstone tidak pernah dimasukkan kembali. */
     const byNisStudents = new Map();
     data.students.forEach((s) => {
+      /* Jangan bawa serta siswa lokal yang dihapus (tombstone lama) atau yang
+         baru saja di-soft-delete di server — mereka tidak boleh hidup kembali. */
+      if (removedStudentIds.has(s.id)) return;
       const k = String(s.nis).toLowerCase();
       if (!byNisStudents.has(k)) byNisStudents.set(k, s);
     });
     const localIdByNis = new Map();
-    data.students.forEach((s) => localIdByNis.set(String(s.nis).toLowerCase(), s.id));
+    data.students.forEach((s) => {
+      if (removedStudentIds.has(s.id)) return;
+      localIdByNis.set(String(s.nis).toLowerCase(), s.id);
+    });
     const remoteIdByNis = new Map();
     remoteStudents.forEach((s) => remoteIdByNis.set(String(s.nis).toLowerCase(), s.id));
 
@@ -539,6 +573,8 @@
         const nis = [...localIdByNis.entries()].find(([, id]) => id === studentId);
         if (nis && remoteIdByNis.has(nis[0])) studentId = remoteIdByNis.get(nis[0]);
       }
+      /* Siswa yang ber-tombstone / soft-delete tidak boleh mengunggah absensinya. */
+      if (removedStudentIds.has(studentId)) return;
       const pair = `${studentId}|${a.date}`;
       if (mergedAttendanceMap.has(pair)) return;
       mergedAttendanceMap.set(pair, Object.assign({}, a, { studentId }));
@@ -553,8 +589,14 @@
     }
     persist();
 
-    /* Unggah siswa & absensi yang hanya ada di lokal. */
-    const studentsToUpload = data.students.filter((s) => !remoteIdByNis.has(String(s.nis).toLowerCase()));
+    /* Unggah siswa & absensi yang hanya ada di lokal (kecuali yang terhapus). */
+    const studentsToUpload = data.students.filter((s) => {
+      const key = String(s.nis).toLowerCase();
+      if (remoteIdByNis.has(key)) return false;
+      if (removedStudentIds.has(s.id)) return false;
+      if (serverDeletedStudentIds.has(s.id)) return false;
+      return true;
+    });
     studentsToUpload.forEach((s) => enqueueSync('upsertStudent', studentRow(s)));
 
     data.attendance.forEach((a) => {

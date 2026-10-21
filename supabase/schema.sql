@@ -12,7 +12,8 @@ create table if not exists public.students (
   nis        text not null unique check (char_length(nis) between 1 and 24),
   name       text not null,
   class      text not null,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  deleted_at timestamptz
 );
 
 create table if not exists public.attendance (
@@ -23,6 +24,7 @@ create table if not exists public.attendance (
   status     text not null check (status in ('hadir', 'telat', 'izin', 'sakit', 'alpa')),
   method     text not null default 'scan' check (method in ('scan', 'manual')),
   created_at timestamptz not null default now(),
+  deleted_at timestamptz,
   unique (student_id, date)
 );
 
@@ -35,6 +37,13 @@ create table if not exists public.settings (
 
 create index if not exists attendance_date_idx    on public.attendance (date);
 create index if not exists attendance_student_idx on public.attendance (student_id);
+
+-- ---------- Migrasi (bila tabel sudah ada sebelum soft-delete) ----------
+-- Jalankan bila kolom deleted_at belum ada; aman diulang.
+alter table public.students   add column if not exists deleted_at timestamptz;
+alter table public.attendance add column if not exists deleted_at timestamptz;
+create index if not exists students_deleted_idx   on public.students (deleted_at);
+create index if not exists attendance_deleted_idx on public.attendance (deleted_at);
 
 -- ---------- RLS (tanpa login: anon boleh baca/tulis) ----------
 
