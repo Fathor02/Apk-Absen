@@ -47,6 +47,10 @@
   }
 
   function saveSettings(event) {
+    if (App.Auth && App.Auth.requireAdmin && !App.Auth.requireAdmin()) {
+      event.preventDefault();
+      return;
+    }
     event.preventDefault();
     const schoolName = $('settingSchoolName').value.trim();
     const lateLimit = $('settingLateLimit').value;
@@ -111,6 +115,9 @@
   }
 
   function init() {
+    if (App.Auth && App.Auth.requireAdmin && !App.Auth.requireAdmin()) {
+      if (utils && utils.toast) utils.toast('Hanya admin yang bisa mengakses halaman ini.', 'warning', 'Akses dibatasi');
+    }
     const form = $('settingsForm');
     const lateInput = $('settingLateLimit');
     const exportBtn = $('backupExport');
@@ -123,10 +130,24 @@
     if (form) form.addEventListener('submit', saveSettings);
     if (lateInput) lateInput.addEventListener('input', updatePreview);
 
-    if (exportBtn) exportBtn.addEventListener('click', exportBackup);
+    if (exportBtn) {
+      exportBtn.addEventListener('click', () => {
+        if (App.Auth && App.Auth.requireAdmin && !App.Auth.requireAdmin()) return;
+        exportBackup();
+      });
+    }
     if (importBtn && importInput) {
-      importBtn.addEventListener('click', () => importInput.click());
-      importInput.addEventListener('change', () => importBackup(importInput.files && importInput.files[0]));
+      importBtn.addEventListener('click', () => {
+        if (App.Auth && App.Auth.requireAdmin && !App.Auth.requireAdmin()) return;
+        importInput.click();
+      });
+      importInput.addEventListener('change', () => {
+        if (App.Auth && App.Auth.requireAdmin && !App.Auth.requireAdmin()) {
+          importInput.value = '';
+          return;
+        }
+        importBackup(importInput.files && importInput.files[0]);
+      });
     }
 
     if (resetBtn) {

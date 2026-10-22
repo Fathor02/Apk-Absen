@@ -798,6 +798,9 @@
   }
 
   function init() {
+    if (App.Auth && App.Auth.requireAdmin && !App.Auth.requireAdmin()) {
+      if (utils && utils.toast) utils.toast('Hanya admin yang bisa mengakses halaman ini.', 'warning', 'Akses dibatasi');
+    }
     const addBtn = $('addStudentBtn');
     const form = $('studentForm');
     const searchInput = $('studentSearch');
@@ -805,7 +808,12 @@
     const table = $('studentTableBody');
     const qrDialog = $('qrDialog');
 
-    if (addBtn) addBtn.addEventListener('click', () => openDialog(null));
+    if (addBtn) {
+      addBtn.addEventListener('click', () => {
+        if (App.Auth && App.Auth.requireAdmin && !App.Auth.requireAdmin()) return;
+        openDialog(null);
+      });
+    }
     if (form) form.addEventListener('submit', saveStudent);
     if (searchInput) searchInput.addEventListener('input', utils.debounce(render, 130));
     if (classFilter) classFilter.addEventListener('change', render);
@@ -815,9 +823,15 @@
         const button = event.target.closest('button[data-action]');
         if (!button) return;
         const id = button.dataset.id;
-        if (button.dataset.action === 'qr') openQrDialog(id);
-        else if (button.dataset.action === 'edit') openDialog(DB.getStudentById(id));
-        else if (button.dataset.action === 'delete') deleteStudent(id);
+        if (button.dataset.action === 'qr') {
+          openQrDialog(id);
+        } else if (button.dataset.action === 'edit') {
+          if (App.Auth && App.Auth.requireAdmin && !App.Auth.requireAdmin()) return;
+          openDialog(DB.getStudentById(id));
+        } else if (button.dataset.action === 'delete') {
+          if (App.Auth && App.Auth.requireAdmin && !App.Auth.requireAdmin()) return;
+          deleteStudent(id);
+        }
       });
     }
 
@@ -826,7 +840,12 @@
     const bulkSource = $('bulkSource');
     const bulkType = $('bulkType');
     const bulkStart = $('bulkStartBtn');
-    if (bulkBtn) bulkBtn.addEventListener('click', openBulkDownloadDialog);
+    if (bulkBtn) {
+      bulkBtn.addEventListener('click', () => {
+        if (App.Auth && App.Auth.requireAdmin && !App.Auth.requireAdmin()) return;
+        openBulkDownloadDialog();
+      });
+    }
     if (bulkSource) bulkSource.addEventListener('change', updateBulkDialog);
     if (bulkType) bulkType.addEventListener('change', updateBulkDialog);
     if (bulkStart) bulkStart.addEventListener('click', downloadAllCodes);
@@ -862,6 +881,7 @@
 
     if (importBtn && importDialog) {
       importBtn.addEventListener('click', () => {
+        if (App.Auth && App.Auth.requireAdmin && !App.Auth.requireAdmin()) return;
         renderImportResult(null);
         if (fileInput) fileInput.value = '';
         if (nameBox) nameBox.textContent = 'Belum ada file dipilih';

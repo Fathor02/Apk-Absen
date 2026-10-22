@@ -189,6 +189,16 @@
   }
 
   function processCode(rawCode, source = 'scan') {
+    if (App.Auth && (App.Auth.requireOperatorOrAdmin ? !App.Auth.requireOperatorOrAdmin() : (App.Auth.requireAdmin ? !App.Auth.requireAdmin() : false))) {
+      if (App.Auth.requireOperatorOrAdmin && !App.Auth.requireOperatorOrAdmin()) {
+        if (utils && utils.toast) utils.toast('Hanya operator atau admin yang bisa melakukan scan.', 'warning', 'Akses dibatasi');
+        return false;
+      }
+      if (!App.Auth.requireOperatorOrAdmin && App.Auth.requireAdmin && !App.Auth.requireAdmin()) {
+        if (utils && utils.toast) utils.toast('Hanya operator atau admin yang bisa melakukan scan.', 'warning', 'Akses dibatasi');
+        return false;
+      }
+    }
     const code = String(rawCode || '').trim();
     if (!code) return false;
 
@@ -368,6 +378,11 @@
   }
 
   function init() {
+    if (App.Auth && (App.Auth.requireOperatorOrAdmin ? !App.Auth.requireOperatorOrAdmin() : (App.Auth.requireAdmin ? !App.Auth.requireAdmin() : false))) {
+      if (App.Auth.requireOperatorOrAdmin && !App.Auth.requireOperatorOrAdmin()) {
+        if (utils && utils.toast) utils.toast('Hanya operator atau admin yang bisa mengakses halaman ini.', 'warning', 'Akses dibatasi');
+      }
+    }
     const startBtn = document.getElementById('startScanBtn');
     const stopBtn = document.getElementById('stopScanBtn');
     const form = document.getElementById('manualScanForm');

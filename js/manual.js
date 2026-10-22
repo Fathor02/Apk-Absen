@@ -164,6 +164,10 @@
   }
 
   function markAbsent(studentId, status) {
+    if (App.Auth && (App.Auth.requireOperatorOrAdmin ? !App.Auth.requireOperatorOrAdmin() : (App.Auth.requireAdmin ? !App.Auth.requireAdmin() : false))) {
+      if (App.Auth.requireOperatorOrAdmin && !App.Auth.requireOperatorOrAdmin()) return;
+      if (!App.Auth.requireOperatorOrAdmin && App.Auth.requireAdmin && !App.Auth.requireAdmin()) return;
+    }
     const student = DB.getStudentById(studentId);
     if (!student) return;
 
@@ -201,7 +205,10 @@
   }
 
   function resetRecord(studentId) {
-    if (App.Auth && typeof App.Auth.requireAdmin === 'function' && !App.Auth.requireAdmin()) return;
+    if (App.Auth && (App.Auth.requireOperatorOrAdmin ? !App.Auth.requireOperatorOrAdmin() : (App.Auth.requireAdmin ? !App.Auth.requireAdmin() : false))) {
+      if (App.Auth.requireOperatorOrAdmin && !App.Auth.requireOperatorOrAdmin()) return;
+      if (!App.Auth.requireOperatorOrAdmin && App.Auth.requireAdmin && !App.Auth.requireAdmin()) return;
+    }
     const student = DB.getStudentById(studentId);
     if (!student) return;
     const date = selectedDate();
@@ -217,6 +224,11 @@
   }
 
   function init() {
+    if (App.Auth && (App.Auth.requireOperatorOrAdmin ? !App.Auth.requireOperatorOrAdmin() : (App.Auth.requireAdmin ? !App.Auth.requireAdmin() : false))) {
+      if (App.Auth.requireOperatorOrAdmin && !App.Auth.requireOperatorOrAdmin()) {
+        if (utils && utils.toast) utils.toast('Hanya operator atau admin yang bisa mengakses halaman ini.', 'warning', 'Akses dibatasi');
+      }
+    }
     const dateInput = $('manualDate');
     const searchInput = $('manualSearch');
     const classSelect = $('manualClass');

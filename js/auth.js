@@ -1,37 +1,125 @@
-/* AbsenSiswa — admin session gate (login & logout) */
+/* AbsenSiswa — role-based session gate (tanpa auth server) */
 (function () {
   'use strict';
 
   const App = window.App;
   const utils = App.utils;
 
-  const SESSION_KEY = 'absensi_siswa_session';
+  const SESSION_KEY = 'absensi_siswa_session_v1';
+
+  const USERS = {
+    superadmin: { password: 'superadmin00', role: 'admin', name: 'Super Admin' },
+    admin: { password: 'adminabsen', role: 'operator', name: 'Operator' }
+  };
+
   let pendingPage = '';
 
-  function getCredUsername() {
+  function getSession() {
     try {
       const raw = sessionStorage.getItem(SESSION_KEY);
-      if (!raw) return '';
+      if (!raw) return null;
       const parsed = JSON.parse(raw);
-      return parsed && parsed.user ? String(parsed.user) : '';
+      if (!parsed || !parsed.role) return null;
+      return parsed;
     } catch (err) {
-      return '';
+      return null;
     }
   }
 
   function isLoggedIn() {
-    return !!getCredUsername();
+    return !!getSession();
   }
 
-  function refreshLogoutButton() {
-    const button = $('logoutBtn');
-    if (!button) return;
-    button.classList.toggle('hidden', !isLoggedIn());
-    button.classList.toggle('flex', isLoggedIn());
+  function getRole() {
+    const session = getSession();
+    return session && session.role ? session.role : 'guest';
+  }
+
+  function getUser() {
+    const session = getSession();
+    return session && session.user ? session.user : '';
+  }
+
+  function getDisplayName() {
+    const session = getSession();
+    if (!session) return '';
+    if (session.name) return session.name;
+    if (session.user) return session.user;
+    return '';
+  }
+
+  function refreshAuthUI() {
+    const logoutBtn = $('logoutBtn');
+    if (logoutBtn) {
+      if (isLoggedIn()) {
+        logoutBtn.classList.remove('hidden');
+        logoutBtn.classList.add('flex');
+      } else {
+        logoutBtn.classList.add('hidden');
+        logoutBtn.classList.remove('flex');
+      }
+    }
+
+    const userInfo = $('userInfo');
+    if (userInfo) {
+      if (isLoggedIn()) {
+        const role = getRole();
+        const name = getDisplayName();
+        const roleLabel = role === 'admin' ? 'Admin' : role === 'operator' ? 'Operator' : role;
+        userInfo.textContent = name ? `${name} (${roleLabel})` : roleLabel;
+        userInfo.classList.remove('hidden');
+      } else {
+        userInfo.textContent = '';
+        userInfo.classList.add('hidden');
+      }
+    }
+
+    const loginTrigger = $('loginTrigger');
+    if (loginTrigger) {
+      if (isLoggedIn()) {
+        loginTrigger.classList.add('hidden');
+      } else {
+        loginTrigger.classList.remove('hidden');
+      }
+    }
+
+    updateNavVisibility();
+  }
+
+  function updateNavVisibility() {
+    const role = getRole();
+    const navs = document.querySelectorAll('[data-nav]');
+    navs.forEach((nav) => {
+      const page = nav.dataset.nav;
+      if (!page) return;
+      if (page === 'dashboard' || page === 'reports') {
+        nav.classList.remove('hidden');
+        return;
+      }
+      if (page === 'scan' || page === 'manual') {
+        if (role === 'admin' || role === 'operator') {
+          nav.classList.remove('hidden');
+        } else {
+          nav.classList.add('hidden');
+        }
+        return;
+      }
+      if (page === 'students' || page === 'settings') {
+        if (role === 'admin') {
+          nav.classList.remove('hidden');
+        } else {
+          nav.classList.add('hidden');
+        }
+        return;
+      }
+    });
   }
 
   function openLogin(pending) {
-    pendingPage = pending && pending !== 'dashboard' ? pending : 'dashboard';
+    pendingPage = pending && pending !== 'dashboard' && pending !== 'reports' ? pending : '';
+    if (pending && (pending === 'scan' || pending === 'manual' || pending === 'students' || pending === 'settings')) {
+      pendingPage = pending;
+    }
 
     const error = $('loginError');
     if (error) {
@@ -58,52 +146,54 @@
       error.textContent = message;
       error.classList.remove('hidden');
     }
-    utils.toast(message, 'error', 'Login gagal');
+    if (utils && utils.toast) {
+      utils.toast(message, 'error', 'Login gagal');
+    }
   }
 
-  async function submit(event) {
+  function submit(event) {
     event.preventDefault();
     const usernameInput = $('loginUsername');
     const passwordInput = $('loginPassword');
     const username = usernameInput ? usernameInput.value.trim() : '';
     const password = passwordInput ? passwordInput.value : '';
 
-    try {
-      const res = await fetch('/api/config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password })
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.ok) {
-        if (passwordInput) passwordInput.value = '';
-        showError(data.error || 'Username atau password salah.');
-        return;
-      }
-
-      try {
-        sessionStorage.setItem(SESSION_KEY, JSON.stringify({
-          user: data.user || username,
-          role: data.role || 'admin',
-          at: new Date().toISOString()
-        }));
-      } catch (err) {
-        console.error('Gagal menyimpan sesi login:', err);
-      }
-
-      const target = pendingPage || 'dashboard';
-      pendingPage = '';
-
-      const dialog = $('loginDialog');
-      if (dialog && dialog.open) dialog.close();
-
-      refreshLogoutButton();
-      utils.toast(`Selamat datang, ${data.user || username}.`, 'success', 'Login berhasil');
-
-      if (target !== 'dashboard') App.navigate(target);
-    } catch (err) {
+    const userData = USERS[username];
+    if (!userData || userData.password !== password) {
       if (passwordInput) passwordInput.value = '';
-      showError('Tidak dapat terhubung ke server untuk login.');
+      showError('Username atau password salah.');
+      return;
+    }
+
+    try {
+      sessionStorage.setItem(
+        SESSION_KEY,
+        JSON.stringify({
+          user: username,
+          role: userData.role,
+          name: userData.name,
+          at: new Date().toISOString()
+        })
+      );
+    } catch (err) {
+      console.error('Gagal menyimpan sesi login:', err);
+    }
+
+    const target = pendingPage || '';
+    pendingPage = '';
+
+    const dialog = $('loginDialog');
+    if (dialog && dialog.open) dialog.close();
+
+    refreshAuthUI();
+    if (utils && utils.toast) {
+      utils.toast(`Selamat datang, ${userData.name}.`, 'success', 'Login berhasil');
+    }
+
+    if (target && App.navigate) {
+      App.navigate(target);
+    } else {
+      App.refreshPage ? App.refreshPage() : null;
     }
   }
 
@@ -114,9 +204,13 @@
       console.error('Gagal menghapus sesi login:', err);
     }
     pendingPage = '';
-    refreshLogoutButton();
-    utils.toast('Anda telah keluar dari sesi admin.', 'info', 'Keluar');
-    App.navigate('dashboard');
+    refreshAuthUI();
+    if (utils && utils.toast) {
+      utils.toast('Anda telah keluar.', 'info', 'Keluar');
+    }
+    if (App.navigate) {
+      App.navigate('dashboard');
+    }
   }
 
   function init() {
@@ -126,17 +220,44 @@
     const logoutBtn = $('logoutBtn');
     if (logoutBtn) logoutBtn.addEventListener('click', logout);
 
-    refreshLogoutButton();
+    const loginTrigger = $('loginTrigger');
+    if (loginTrigger) loginTrigger.addEventListener('click', () => openLogin(''));
+
+    refreshAuthUI();
   }
 
-  function requireAdmin() {
-    if (isLoggedIn()) return true;
-    openLogin(App && App._lastPage ? App._lastPage : 'dashboard');
-    utils.toast('Hanya admin yang bisa melakukan aksi ini.', 'warning', 'Akses dibatasi');
+  function requireRole(roles) {
+    const role = getRole();
+    const allowed = Array.isArray(roles) ? roles : [roles];
+    if (allowed.includes(role)) return true;
+    openLogin(App && App._lastPage ? App._lastPage : '');
+    if (utils && utils.toast) {
+      utils.toast('Anda tidak memiliki akses untuk halaman ini.', 'warning', 'Akses dibatasi');
+    }
     return false;
   }
 
-  App.Auth = { init, isLoggedIn, openLogin, logout, requireAdmin, getUser: getCredUsername };
+  function requireAdmin() {
+    return requireRole(['admin']);
+  }
+
+  function requireOperatorOrAdmin() {
+    return requireRole(['admin', 'operator']);
+  }
+
+  App.Auth = {
+    init,
+    isLoggedIn,
+    getRole,
+    getUser,
+    getDisplayName,
+    openLogin,
+    logout,
+    requireRole,
+    requireAdmin,
+    requireOperatorOrAdmin,
+    refreshAuthUI
+  };
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);

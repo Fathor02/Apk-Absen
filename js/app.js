@@ -50,11 +50,19 @@
   function showPage(id) {
     let pageId = PAGES[id] ? id : 'dashboard';
 
-    if (pageId !== 'dashboard' && App.Auth && !App.Auth.isLoggedIn()) {
-      App.Auth.openLogin(pageId);
-      pageId = currentPage && currentPage !== pageId ? currentPage : 'dashboard';
-      if (window.location.hash !== `#${pageId}`) {
-        window.history.replaceState(null, '', `#${pageId}`);
+    const role = App.Auth && App.Auth.getRole ? App.Auth.getRole() : 'guest';
+
+    if (pageId === 'scan' || pageId === 'manual') {
+      if (role !== 'admin' && role !== 'operator') {
+        if (App.Auth && App.Auth.openLogin) App.Auth.openLogin(pageId);
+        pageId = currentPage && currentPage !== pageId ? currentPage : 'dashboard';
+      }
+    }
+
+    if (pageId === 'students' || pageId === 'settings') {
+      if (role !== 'admin') {
+        if (App.Auth && App.Auth.openLogin) App.Auth.openLogin(pageId);
+        pageId = currentPage && currentPage !== pageId ? currentPage : 'dashboard';
       }
     }
 
@@ -154,6 +162,9 @@
   }
 
   function init() {
+    if (App.Auth && typeof App.Auth.refreshAuthUI === 'function') {
+      try { App.Auth.refreshAuthUI(); } catch (err) {}
+    }
     if (!App.DB) {
       console.error('Data layer tidak tersedia.');
       return;
