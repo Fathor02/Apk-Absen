@@ -4,6 +4,9 @@
   "functions": {
     "api/config.js": {
       "maxDuration": 10
+    },
+    "api/auth/login.js": {
+      "maxDuration": 10
     }
   }
 }
