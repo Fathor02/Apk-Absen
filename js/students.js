@@ -561,6 +561,241 @@
     }
   }
 
+  /* ---------- Bulk download QR/Barcode (ZIP PNG) ---------- */
+
+  function getBulkTargetStudents(source) {
+    if (source === 'filtered') {
+      return filteredStudents();
+    }
+    return DB.getStudents().slice().sort((a, b) => a.name.localeCompare(b.name, 'id'));
+  }
+
+  function updateBulkDialog() {
+    const dialog = $('bulkDownloadDialog');
+    if (!dialog) return;
+    const source = $('bulkSource') ? $('bulkSource').value : 'all';
+    const countEl = $('bulkCount');
+    if (countEl) {
+      countEl.textContent = String(getBulkTargetStudents(source).length);
+    }
+  }
+
+  function openBulkDownloadDialog() {
+    const dialog = $('bulkDownloadDialog');
+    if (!dialog) return;
+    updateBulkDialog();
+    if ($('bulkProgress')) {
+      $('bulkProgress').classList.add('hidden');
+      $('bulkProgress').textContent = '';
+    }
+    const startBtn = $('bulkStartBtn');
+    if (startBtn) {
+      startBtn.disabled = false;
+      startBtn.classList.remove('opacity-60', 'cursor-not-allowed');
+    }
+    if (typeof dialog.showModal === 'function') dialog.showModal();
+    else dialog.setAttribute('open', '');
+  }
+
+  function generateQrPngDataUrl(text, size) {
+    const tmp = document.createElement('div');
+    tmp.style.position = 'absolute';
+    tmp.style.left = '-9999px';
+    tmp.style.top = '-9999px';
+    document.body.appendChild(tmp);
+    return new Promise((resolve, reject) => {
+      try {
+        if (!window.QRCode) {
+          document.body.removeChild(tmp);
+          return reject(new Error('QRCode.js tidak tersedia'));
+        }
+        tmp.innerHTML = '';
+        new window.QRCode(tmp, {
+          text: String(text || ''),
+          width: size || 220,
+          height: size || 220,
+          colorDark: '#0f172a',
+          colorLight: '#ffffff',
+          correctLevel: window.QRCode.CorrectLevel ? window.QRCode.CorrectLevel.M : 2
+        });
+        setTimeout(() => {
+          try {
+            const el = tmp.querySelector('canvas') || tmp.querySelector('img');
+            if (!el) {
+              document.body.removeChild(tmp);
+              return reject(new Error('Gagal menghasilkan QR'));
+            }
+            let dataUrl = '';
+            if (el.tagName === 'CANVAS') {
+              dataUrl = el.toDataURL('image/png');
+            } else {
+              const canvas = document.createElement('canvas');
+              canvas.width = size || 220;
+              canvas.height = size || 220;
+              const ctx = canvas.getContext('2d');
+              const img = new Image();
+              img.onload = () => {
+                try {
+                  ctx.drawImage(img, 0, 0, size || 220, size || 220);
+                  const out = canvas.toDataURL('image/png');
+                  document.body.removeChild(tmp);
+                  resolve(out);
+                } catch (e) {
+                  document.body.removeChild(tmp);
+                  reject(e);
+                }
+              };
+              img.onerror = () => {
+                document.body.removeChild(tmp);
+                reject(new Error('Gagal memuat QR'));
+              };
+              img.src = el.src;
+              return;
+            }
+            document.body.removeChild(tmp);
+            resolve(dataUrl);
+          } catch (e) {
+            document.body.removeChild(tmp);
+            reject(e);
+          }
+        }, 40);
+      } catch (e) {
+        document.body.removeChild(tmp);
+        reject(e);
+      }
+    });
+  }
+
+  function generateBarcodeWithLabelDataUrl(nis, name, kelas) {
+    const width = 640;
+    const height = 220;
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return Promise.reject(new Error('Canvas tidak tersedia'));
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, width, height);
+    return new Promise((resolve, reject) => {
+      try {
+        if (!window.JsBarcode) return reject(new Error('JsBarcode tidak tersedia'));
+        const barCanvas = document.createElement('canvas');
+        barCanvas.width = 560;
+        barCanvas.height = 120;
+        window.JsBarcode(barCanvas, String(nis || ''), {
+          format: 'CODE128',
+          width: 2,
+          height: 76,
+          displayValue: false,
+          margin: 0,
+          background: '#ffffff',
+          lineColor: '#0f172a'
+        });
+        ctx.drawImage(barCanvas, 40, 20, 560, 120);
+        ctx.fillStyle = '#0f172a';
+        ctx.font = 'bold 16px Inter, Arial, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(`NIS : ${nis || '-'}`, width / 2, 150);
+        ctx.font = '14px Inter, Arial, sans-serif';
+        const nameText = String(name || '-');
+        ctx.fillText(`Nama : ${nameText}`, width / 2, 176);
+        if (kelas) {
+          ctx.font = '12px Inter, Arial, sans-serif';
+          ctx.fillText(`Kelas : ${kelas}`, width / 2, 198);
+        }
+        resolve(canvas.toDataURL('image/png'));
+      } catch (e) {
+        reject(e);
+      }
+    });
+  }
+
+  async function downloadAllCodes() {
+    const dialog = $('bulkDownloadDialog');
+    const source = $('bulkSource') ? $('bulkSource').value : 'all';
+    const type = $('bulkType') ? $('bulkType').value : 'both';
+    const startBtn = $('bulkStartBtn');
+    const progress = $('bulkProgress');
+    const students = getBulkTargetStudents(source);
+    if (!students.length) {
+      utils.toast('Tidak ada siswa untuk diunduh.', 'warning', 'Kosong');
+      return;
+    }
+    if (typeof JSZip === 'undefined') {
+      utils.toast('Library JSZip gagal dimuat. Periksa koneksi internet.', 'error', 'ZIP tidak tersedia');
+      return;
+    }
+    if (startBtn) {
+      startBtn.disabled = true;
+      startBtn.classList.add('opacity-60', 'cursor-not-allowed');
+    }
+    if (progress) {
+      progress.classList.remove('hidden');
+      progress.textContent = `Sedang membuat... 0/${students.length}`;
+    }
+    try {
+      const zip = new JSZip();
+      const qrFolder = zip.folder('QR');
+      const barFolder = zip.folder('Barcode');
+      for (let i = 0; i < students.length; i += 1) {
+        const s = students[i];
+        const nisSlug = utils.slugify(s.nis || '');
+        const nameSlug = utils.slugify(s.name || '');
+        const base = `${nisSlug}_${nameSlug || 'Siswa'}`;
+        if (type === 'qr' || type === 'both') {
+          try {
+            const qrUrl = await generateQrPngDataUrl(s.nis, 256);
+            const qrData = qrUrl.split(',')[1];
+            if (qrFolder && qrData) qrFolder.file(`QR_${base}.png`, qrData, { base64: true });
+          } catch (err) {
+            console.error('Gagal generate QR', s.nis, err);
+          }
+        }
+        if (type === 'barcode' || type === 'both') {
+          try {
+            const barUrl = await generateBarcodeWithLabelDataUrl(s.nis, s.name, s.class);
+            const barData = barUrl.split(',')[1];
+            if (barFolder && barData) barFolder.file(`Barcode_${base}.png`, barData, { base64: true });
+          } catch (err) {
+            console.error('Gagal generate Barcode', s.nis, err);
+          }
+        }
+        if (progress) progress.textContent = `Sedang membuat... ${i + 1}/${students.length}`;
+        await new Promise((r) => setTimeout(r, 60));
+      }
+      const now = new Date();
+      const pad = (n) => String(n).padStart(2, '0');
+      const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+      const blob = await zip.generateAsync({ type: 'blob' });
+      if (typeof saveAs === 'function') {
+        saveAs(blob, `Barcode-QR-Semua-Siswa_${stamp}.zip`);
+      } else {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Barcode-QR-Semua-Siswa_${stamp}.zip`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
+      utils.toast(`ZIP berhasil diunduh (${students.length} siswa).`, 'success', 'Unduh selesai');
+      if (dialog && typeof dialog.close === 'function') dialog.close();
+    } catch (err) {
+      console.error(err);
+      utils.toast('Gagal membuat ZIP. Coba lagi.', 'error', 'Gagal unduh');
+    } finally {
+      if (startBtn) {
+        startBtn.disabled = false;
+        startBtn.classList.remove('opacity-60', 'cursor-not-allowed');
+      }
+      if (progress) {
+        progress.classList.add('hidden');
+        progress.textContent = '';
+      }
+    }
+  }
+
   function init() {
     const addBtn = $('addStudentBtn');
     const form = $('studentForm');
@@ -582,6 +817,30 @@
         if (button.dataset.action === 'qr') openQrDialog(id);
         else if (button.dataset.action === 'edit') openDialog(DB.getStudentById(id));
         else if (button.dataset.action === 'delete') deleteStudent(id);
+      });
+    }
+
+    const bulkBtn = $('btnBulkDownload');
+    const bulkDialog = $('bulkDownloadDialog');
+    const bulkSource = $('bulkSource');
+    const bulkType = $('bulkType');
+    const bulkStart = $('bulkStartBtn');
+    if (bulkBtn) bulkBtn.addEventListener('click', openBulkDownloadDialog);
+    if (bulkSource) bulkSource.addEventListener('change', updateBulkDialog);
+    if (bulkType) bulkType.addEventListener('change', updateBulkDialog);
+    if (bulkStart) bulkStart.addEventListener('click', downloadAllCodes);
+    if (bulkDialog) {
+      bulkDialog.addEventListener('close', () => {
+        const startBtn = $('bulkStartBtn');
+        const progress = $('bulkProgress');
+        if (startBtn) {
+          startBtn.disabled = false;
+          startBtn.classList.remove('opacity-60', 'cursor-not-allowed');
+        }
+        if (progress) {
+          progress.classList.add('hidden');
+          progress.textContent = '';
+        }
       });
     }
 
