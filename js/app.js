@@ -188,19 +188,31 @@
     if (closeBtn) closeBtn.addEventListener('click', closeSidebar);
     if (overlay) overlay.addEventListener('click', closeSidebar);
 
-    document.addEventListener('click', (event) => {
-      const nav = event.target.closest('[data-nav]');
-      if (nav) {
-        event.preventDefault();
-        navigate(nav.dataset.nav);
-        return;
+  document.addEventListener('click', (event) => {
+    const nav = event.target.closest('[data-nav]');
+    if (nav) {
+      event.preventDefault();
+      const pageId = nav.dataset.nav;
+      const role = App.Auth && App.Auth.getRole ? App.Auth.getRole() : 'guest';
+      if (pageId === 'scan' || pageId === 'manual') {
+        if (role !== 'admin' && role !== 'operator') {
+          if (App.Auth && App.Auth.openLogin) { App.Auth.openLogin(pageId); return; }
+        }
       }
-      const closer = event.target.closest('[data-close-dialog]');
-      if (closer) {
-        const dialog = document.getElementById(closer.dataset.closeDialog);
-        if (dialog && dialog.open) dialog.close();
+      if (pageId === 'students' || pageId === 'settings') {
+        if (role !== 'admin') {
+          if (App.Auth && App.Auth.openLogin) { App.Auth.openLogin(pageId); return; }
+        }
       }
-    });
+      navigate(pageId);
+      return;
+    }
+    const closer = event.target.closest('[data-close-dialog]');
+    if (closer) {
+      const dialog = document.getElementById(closer.dataset.closeDialog);
+      if (dialog && dialog.open) dialog.close();
+    }
+  });
 
     document.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') closeSidebar();

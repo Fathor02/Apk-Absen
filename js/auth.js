@@ -14,6 +14,10 @@
 
   let pendingPage = '';
 
+  function $(id) {
+    return document.getElementById(id);
+  }
+
   function getSession() {
     try {
       const raw = sessionStorage.getItem(SESSION_KEY);
@@ -130,7 +134,8 @@
     if (form) form.reset();
 
     const dialog = $('loginDialog');
-    if (dialog && !dialog.open) {
+    if (!dialog) return;
+    if (!dialog.open) {
       if (typeof dialog.showModal === 'function') dialog.showModal();
       else dialog.setAttribute('open', '');
     }
@@ -221,7 +226,12 @@
     if (logoutBtn) logoutBtn.addEventListener('click', logout);
 
     const loginTrigger = $('loginTrigger');
-    if (loginTrigger) loginTrigger.addEventListener('click', () => openLogin(''));
+    if (loginTrigger) {
+      loginTrigger.addEventListener('click', (e) => {
+        e.preventDefault();
+        openLogin('');
+      });
+    }
 
     refreshAuthUI();
   }
