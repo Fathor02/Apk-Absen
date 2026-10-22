@@ -58,6 +58,8 @@
       }
     }
 
+    App._lastPage = pageId;
+
     const meta = PAGES[pageId];
 
     if (currentPage && currentPage !== pageId) {

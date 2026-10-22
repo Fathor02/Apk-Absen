@@ -201,6 +201,7 @@
   }
 
   function resetRecord(studentId) {
+    if (App.Auth && typeof App.Auth.requireAdmin === 'function' && !App.Auth.requireAdmin()) return;
     const student = DB.getStudentById(studentId);
     if (!student) return;
     const date = selectedDate();

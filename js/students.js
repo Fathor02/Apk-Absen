@@ -156,6 +156,7 @@
   function deleteStudent(id) {
     const student = DB.getStudentById(id);
     if (!student) return;
+    if (App.Auth && typeof App.Auth.requireAdmin === 'function' && !App.Auth.requireAdmin()) return;
     const ok = window.confirm(`Hapus ${student.name} (${student.class})?\n\nSeluruh riwayat absensi siswa ini juga akan dihapus.`);
     if (!ok) return;
 

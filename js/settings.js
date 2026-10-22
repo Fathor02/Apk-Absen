@@ -131,6 +131,7 @@
 
     if (resetBtn) {
       resetBtn.addEventListener('click', () => {
+        if (App.Auth && typeof App.Auth.requireAdmin === 'function' && !App.Auth.requireAdmin()) return;
         const ok = window.confirm('Hapus semua riwayat absensi? Data siswa tetap tersimpan.');
         if (!ok) return;
         DB.resetAttendance();
@@ -141,6 +142,7 @@
 
     if (clearBtn) {
       clearBtn.addEventListener('click', () => {
+        if (App.Auth && typeof App.Auth.requireAdmin === 'function' && !App.Auth.requireAdmin()) return;
         const ok = window.confirm('Hapus SEMUA data siswa dan absensi? Tindakan ini tidak dapat dibatalkan.');
         if (!ok) return;
         DB.clearAll();

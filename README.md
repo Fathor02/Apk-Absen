@@ -78,16 +78,13 @@ Cara kerja di Vercel: `index.html` memuat `/api/config.js`, yaitu serverless fun
 
 ## Login Admin
 
-Dashboard dapat dibuka tanpa login, tetapi halaman **Scan, Absensi Manual, Rekap, Data Siswa, dan Pengaturan** dikunci dan akan memunculkan dialog login:
-
-| | |
-| --- | --- |
-| Username | `admin` |
-| Password | `adminabsen` |
+Dashboard dapat dibuka tanpa login, tetapi halaman **Scan, Absensi Manual, Rekap, Data Siswa, dan Pengaturan** dikunci dan akan memunculkan dialog login.
 
 - Sesi disimpan di `sessionStorage` (per-tab) — tutup tab akan mengakhiri sesi; refresh tetap login.
 - **Keluar dari Admin** ada di sidebar bawah (hanya tampil setelah login).
-- Kredensial disimpan di `js/auth.js` sebagai pengunci antarmuka/demo — ini **bukan keamanan sungguhan** karena bisa dilihat di source. Jangan gunakan untuk data sensitif nyata tanpa autentikasi di server.
+- Kredensial diatur melalui variabel lingkungan `ADMIN_USER` dan `ADMIN_PASS`. Validasi login dilakukan di server (bukan di kode klien), sehingga kredensial tidak disimpan di berkas JavaScript publik.
+- Saat ini perlindungan ini bersifat pengunci antarmuka. Untuk penggunaan publik di internet, disarankan menambahkan otorisasi berbasis peran dan RLS Supabase yang lebih ketat.
+
 
 ## Penyimpanan Data
 

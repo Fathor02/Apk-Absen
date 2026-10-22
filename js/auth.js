@@ -6,23 +6,21 @@
   const utils = App.utils;
 
   const SESSION_KEY = 'absensi_siswa_session';
-  const CREDENTIALS = { username: 'admin', password: 'adminabsen' };
-
   let pendingPage = '';
 
-  function $(id) {
-    return document.getElementById(id);
+  function getCredUsername() {
+    try {
+      const raw = sessionStorage.getItem(SESSION_KEY);
+      if (!raw) return '';
+      const parsed = JSON.parse(raw);
+      return parsed && parsed.user ? String(parsed.user) : '';
+    } catch (err) {
+      return '';
+    }
   }
 
   function isLoggedIn() {
-    try {
-      const raw = sessionStorage.getItem(SESSION_KEY);
-      if (!raw) return false;
-      const parsed = JSON.parse(raw);
-      return !!(parsed && parsed.user === CREDENTIALS.username);
-    } catch (err) {
-      return false;
-    }
+    return !!getCredUsername();
   }
 
   function refreshLogoutButton() {
@@ -63,38 +61,50 @@
     utils.toast(message, 'error', 'Login gagal');
   }
 
-  function submit(event) {
+  async function submit(event) {
     event.preventDefault();
     const usernameInput = $('loginUsername');
     const passwordInput = $('loginPassword');
     const username = usernameInput ? usernameInput.value.trim() : '';
     const password = passwordInput ? passwordInput.value : '';
 
-    if (username !== CREDENTIALS.username || password !== CREDENTIALS.password) {
-      if (passwordInput) passwordInput.value = '';
-      showError('Username atau password salah.');
-      return;
-    }
-
     try {
-      sessionStorage.setItem(SESSION_KEY, JSON.stringify({
-        user: username,
-        at: new Date().toISOString()
-      }));
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) {
+        if (passwordInput) passwordInput.value = '';
+        showError(data.error || 'Username atau password salah.');
+        return;
+      }
+
+      try {
+        sessionStorage.setItem(SESSION_KEY, JSON.stringify({
+          user: data.user || username,
+          role: data.role || 'admin',
+          at: new Date().toISOString()
+        }));
+      } catch (err) {
+        console.error('Gagal menyimpan sesi login:', err);
+      }
+
+      const target = pendingPage || 'dashboard';
+      pendingPage = '';
+
+      const dialog = $('loginDialog');
+      if (dialog && dialog.open) dialog.close();
+
+      refreshLogoutButton();
+      utils.toast(`Selamat datang, ${data.user || username}.`, 'success', 'Login berhasil');
+
+      if (target !== 'dashboard') App.navigate(target);
     } catch (err) {
-      console.error('Gagal menyimpan sesi login:', err);
+      if (passwordInput) passwordInput.value = '';
+      showError('Tidak dapat terhubung ke server untuk login.');
     }
-
-    const target = pendingPage || 'dashboard';
-    pendingPage = '';
-
-    const dialog = $('loginDialog');
-    if (dialog && dialog.open) dialog.close();
-
-    refreshLogoutButton();
-    utils.toast(`Selamat datang, ${username}.`, 'success', 'Login berhasil');
-
-    if (target !== 'dashboard') App.navigate(target);
   }
 
   function logout() {
@@ -119,7 +129,14 @@
     refreshLogoutButton();
   }
 
-  App.Auth = { init, isLoggedIn, openLogin, logout };
+  function requireAdmin() {
+    if (isLoggedIn()) return true;
+    openLogin(App && App._lastPage ? App._lastPage : 'dashboard');
+    utils.toast('Hanya admin yang bisa melakukan aksi ini.', 'warning', 'Akses dibatasi');
+    return false;
+  }
+
+  App.Auth = { init, isLoggedIn, openLogin, logout, requireAdmin, getUser: getCredUsername };
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);

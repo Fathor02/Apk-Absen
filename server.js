@@ -53,12 +53,55 @@ function configJs() {
   return `window.APP_CONFIG = ${JSON.stringify(cfg)};`;
 }
 
-const server = http.createServer((req, res) => {
+function readJson(req) {
+  return new Promise((resolve) => {
+    let body = '';
+    req.on('data', (chunk) => {
+      body += chunk;
+      if (body.length > 2048) req.destroy();
+    });
+    req.on('end', () => {
+      try {
+        if (!body) return resolve({});
+        resolve(JSON.parse(body));
+      } catch (err) {
+        resolve(null);
+      }
+    });
+    req.on('error', () => resolve(null));
+  });
+}
+
+function sendJson(res, status, payload) {
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+  res.end(JSON.stringify(payload));
+}
+
+const server = http.createServer(async (req, res) => {
   const urlPath = decodeURIComponent((req.url || '/').split('?')[0]);
 
   if (urlPath === '/api/config.js' || urlPath === '/js/config.js') {
     res.writeHead(200, { 'Content-Type': MIME['.js'], 'Cache-Control': 'no-store' });
     res.end(configJs());
+    return;
+  }
+
+  if (urlPath === '/api/auth/login' && req.method === 'POST') {
+    const env = parseEnv();
+    const adminUser = (env.ADMIN_USER || 'admin').trim();
+    const adminPass = (env.ADMIN_PASS || 'adminabsen').trim();
+    const data = await readJson(req);
+    if (!data || typeof data !== 'object') {
+      sendJson(res, 400, { ok: false, error: 'Permintaan tidak valid.' });
+      return;
+    }
+    const username = String(data.username || '').trim();
+    const password = String(data.password || '');
+    if (username === adminUser && password === adminPass) {
+      sendJson(res, 200, { ok: true, user: adminUser, role: 'admin' });
+      return;
+    }
+    sendJson(res, 401, { ok: false, error: 'Username atau password salah.' });
     return;
   }
 
